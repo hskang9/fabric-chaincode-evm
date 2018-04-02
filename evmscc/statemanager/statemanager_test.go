@@ -16,8 +16,8 @@ package statemanager_test
 import (
 	"github.com/hyperledger/burrow/account"
 	"github.com/hyperledger/burrow/binary"
-	. "github.com/hyperledger/fabric-chaincode-evm/statemanager"
-	"github.com/hyperledger/fabric/core/chaincode/shim"
+	"github.com/hyperledger/fabric-chaincode-evm/evmscc/mocks"
+	. "github.com/hyperledger/fabric-chaincode-evm/evmscc/statemanager"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -27,12 +27,12 @@ var _ = Describe("Statemanager", func() {
 
 	var (
 		sm       StateManager
-		mockStub *shim.MockStub
+		mockStub *mocks.MockStub
 		addr     account.Address
 	)
 
 	BeforeEach(func() {
-		mockStub = shim.NewMockStub("mock", nil)
+		mockStub = mocks.NewMockStub("mock", nil)
 		sm = NewStateManager(mockStub)
 
 		var err error

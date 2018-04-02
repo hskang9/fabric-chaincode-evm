@@ -27,6 +27,7 @@ import (
 	"github.com/hyperledger/burrow/binary"
 	"github.com/hyperledger/burrow/execution/evm"
 	"github.com/hyperledger/burrow/logging/loggers"
+	"github.com/hyperledger/fabric-chaincode-evm/evmscc/statemanager"
 	"github.com/hyperledger/fabric/common/flogging"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"github.com/hyperledger/fabric/protos/msp"
@@ -41,7 +42,7 @@ func New() shim.Chaincode {
 	return &EvmChaincode{}
 }
 
-type EvmChaincode struct {}
+type EvmChaincode struct{}
 
 func (evmcc *EvmChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response {
 	logger.Debugf("Init evmscc, it's no-op")
@@ -83,7 +84,7 @@ func (evmcc *EvmChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response 
 	}
 
 	var gas uint64 = 10000
-	state := NewStateManager(stub)
+	state := statemanager.NewStateManager(stub)
 	vm := evm.NewVM(state, evm.DefaultDynamicMemoryProvider, newParams(), callerAddr, nil, evmLogger)
 
 	if calleeAddr == account.ZeroAddress {
@@ -209,4 +210,3 @@ func identityToAddr(id []byte) (account.Address, error) {
 
 	return account.AddressFromWord256(sha3.Sum256(pubkeyBytes)), nil
 }
-
