@@ -53,10 +53,7 @@ func NewServerHandlerTransport(w http.ResponseWriter, r *http.Request) (ServerTr
 	if r.Method != "POST" {
 		return nil, errors.New("invalid gRPC request method")
 	}
-	contentType := r.Header.Get("Content-Type")
-	// TODO: do we assume contentType is lowercase? we did before
-	contentSubtype, validContentType := contentSubtype(contentType)
-	if !validContentType {
+	if !validContentType(r.Header.Get("Content-Type")) {
 		return nil, errors.New("invalid gRPC request content-type")
 	}
 	if _, ok := w.(http.Flusher); !ok {
@@ -67,12 +64,10 @@ func NewServerHandlerTransport(w http.ResponseWriter, r *http.Request) (ServerTr
 	}
 
 	st := &serverHandlerTransport{
-		rw:             w,
-		req:            r,
-		closedCh:       make(chan struct{}),
-		writes:         make(chan func()),
-		contentType:    contentType,
-		contentSubtype: contentSubtype,
+		rw:       w,
+		req:      r,
+		closedCh: make(chan struct{}),
+		writes:   make(chan func()),
 	}
 
 	if v := r.Header.Get("grpc-timeout"); v != "" {
@@ -84,7 +79,7 @@ func NewServerHandlerTransport(w http.ResponseWriter, r *http.Request) (ServerTr
 		st.timeout = to
 	}
 
-	metakv := []string{"content-type", contentType}
+	var metakv []string
 	if r.Host != "" {
 		metakv = append(metakv, ":authority", r.Host)
 	}
@@ -131,12 +126,6 @@ type serverHandlerTransport struct {
 	// block concurrent WriteStatus calls
 	// e.g. grpc/(*serverStream).SendMsg/RecvMsg
 	writeStatusMu sync.Mutex
-
-	// we just mirror the request content-type
-	contentType string
-	// we store both contentType and contentSubtype so we don't keep recreating them
-	// TODO make sure this is consistent across handler_server and http2_server
-	contentSubtype string
 }
 
 func (ht *serverHandlerTransport) Close() error {
@@ -246,7 +235,7 @@ func (ht *serverHandlerTransport) writeCommonHeaders(s *Stream) {
 
 	h := ht.rw.Header()
 	h["Date"] = nil // suppress Date to make tests happy; TODO: restore
-	h.Set("Content-Type", ht.contentType)
+	h.Set("Content-Type", "application/grpc")
 
 	// Predeclare trailers we'll set later in WriteStatus (after the body).
 	// This is a SHOULD in the HTTP RFC, and the way you add (known)
@@ -324,14 +313,13 @@ func (ht *serverHandlerTransport) HandleStreams(startStream func(*Stream), trace
 	req := ht.req
 
 	s := &Stream{
-		id:             0, // irrelevant
-		requestRead:    func(int) {},
-		cancel:         cancel,
-		buf:            newRecvBuffer(),
-		st:             ht,
-		method:         req.URL.Path,
-		recvCompress:   req.Header.Get("grpc-encoding"),
-		contentSubtype: ht.contentSubtype,
+		id:           0, // irrelevant
+		requestRead:  func(int) {},
+		cancel:       cancel,
+		buf:          newRecvBuffer(),
+		st:           ht,
+		method:       req.URL.Path,
+		recvCompress: req.Header.Get("grpc-encoding"),
 	}
 	pr := &peer.Peer{
 		Addr: ht.RemoteAddr(),

@@ -13,8 +13,8 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/rpc/v2"
-	"github.com/hyperledger/fabric-sdk-go/api/apitxn"
-	"github.com/hyperledger/fabric-sdk-go/pkg/config"
+	"github.com/hyperledger/fabric-sdk-go/pkg/client/channel"
+	"github.com/hyperledger/fabric-sdk-go/pkg/core/config"
 	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk"
 	"github.com/hyperledger/fabric/protos/common"
 	"github.com/hyperledger/fabric/protos/peer"
@@ -96,57 +96,59 @@ func (s *EthServer) Start(port int) {
 
 func (req *ethRPCService) GetCode(r *http.Request, args *DataParam, reply *string) error {
 
-	chClient, err := req.sdk.NewChannelClient(channelID, defaultUser)
+	chCtx := req.sdk.ChannelContext(channelID, fabsdk.WithUser(defaultUser))
+	chClient, err := channel.New(chCtx)
 	if err != nil {
-		log.Panic("error creating client", err)
+		fmt.Printf("Failed to create channel client: %s\n", err.Error())
+		return err
 	}
-
-	defer chClient.Close()
 
 	queryArgs := [][]byte{[]byte(Strip0xFromHex(string(*args)))}
 
-	value, err := Query(chClient, "evmscc", "getCode", queryArgs)
+	resp, err := Query(chClient, "evmscc", "getCode", queryArgs)
 	if err != nil {
 		fmt.Printf("Failed to query: %s\n", err)
 	}
-	*reply = string(value)
+	*reply = string(resp.Payload)
 
 	return nil
 }
 
 func (req *ethRPCService) Call(r *http.Request, params *Params, reply *string) error {
 
-	chClient, err := req.sdk.NewChannelClient(channelID, defaultUser)
+	chCtx := req.sdk.ChannelContext(channelID, fabsdk.WithUser(defaultUser))
+	chClient, err := channel.New(chCtx)
 	if err != nil {
+		fmt.Printf("Failed to create channel client: %s\n", err.Error())
 		return err
 	}
-	defer chClient.Close()
 
 	args := [][]byte{[]byte(Strip0xFromHex(params.Data))}
 
-	value, err := Query(chClient, "evmscc", Strip0xFromHex(params.To), args)
+	resp, err := Query(chClient, "evmscc", Strip0xFromHex(params.To), args)
 	if err != nil {
 		fmt.Printf("Failed to query: %s\n", err)
 		return err
 	}
 
-	*reply = "0x" + hex.EncodeToString(value)
+	*reply = "0x" + hex.EncodeToString(resp.Payload)
 
 	return nil
 }
 
 func (req *ethRPCService) SendTransaction(r *http.Request, params *Params, reply *string) error {
-	chClient, err := req.sdk.NewChannelClient(channelID, defaultUser)
+	chCtx := req.sdk.ChannelContext(channelID, fabsdk.WithUser(defaultUser))
+	chClient, err := channel.New(chCtx)
 	if err != nil {
+		fmt.Printf("Failed to create channel client: %s\n", err.Error())
 		return err
 	}
-	defer chClient.Close()
 
 	if params.To == "" {
 		params.To = hex.EncodeToString(zeroAddress)
 	}
 
-	txReq := apitxn.ExecuteTxRequest{
+	txReq := channel.Request{
 		ChaincodeID: "evmscc",
 		Fcn:         Strip0xFromHex(params.To),
 		Args:        [][]byte{[]byte(Strip0xFromHex(params.Data))},
@@ -154,19 +156,24 @@ func (req *ethRPCService) SendTransaction(r *http.Request, params *Params, reply
 
 	//Return only the transaction ID
 	//Maybe change to an async transaction
-	_, txID, err := chClient.ExecuteTx(txReq)
+	resp, err := chClient.Execute(txReq)
 	if err != nil {
 		fmt.Printf("Failed to execute transaction: %s\n", err)
 		return err
 	}
 
-	*reply = txID.ID
+	*reply = string(resp.TransactionID)
 
 	return nil
 }
 
 func (req *ethRPCService) GetTransactionReceipt(r *http.Request, param *DataParam, reply *TxReceipt) error {
-	chClient, err := req.sdk.NewChannelClient(channelID, defaultUser)
+	chCtx := req.sdk.ChannelContext(channelID, fabsdk.WithUser(defaultUser))
+	chClient, err := channel.New(chCtx)
+	if err != nil {
+		fmt.Printf("Failed to create channel client: %s\n", err.Error())
+		return err
+	}
 
 	args := [][]byte{[]byte(channelID), []byte(*param)}
 
@@ -176,7 +183,7 @@ func (req *ethRPCService) GetTransactionReceipt(r *http.Request, param *DataPara
 	}
 
 	tx := &peer.ProcessedTransaction{}
-	err = proto.Unmarshal(t, tx)
+	err = proto.Unmarshal(t.Payload, tx)
 	if err != nil {
 		return err
 	}
@@ -188,7 +195,7 @@ func (req *ethRPCService) GetTransactionReceipt(r *http.Request, param *DataPara
 	}
 
 	block := &common.Block{}
-	err = proto.Unmarshal(b, block)
+	err = proto.Unmarshal(b.Payload, block)
 	if err != nil {
 		return err
 	}
@@ -243,9 +250,9 @@ func (req *ethRPCService) GetTransactionReceipt(r *http.Request, param *DataPara
 	return nil
 }
 
-func Query(chClient apitxn.ChannelClient, chaincodeID string, function string, queryArgs [][]byte) ([]byte, error) {
+func Query(chClient *channel.Client, chaincodeID string, function string, queryArgs [][]byte) (channel.Response, error) {
 
-	return chClient.Query(apitxn.QueryRequest{
+	return chClient.Query(channel.Request{
 		ChaincodeID: chaincodeID,
 		Fcn:         function,
 		Args:        queryArgs,

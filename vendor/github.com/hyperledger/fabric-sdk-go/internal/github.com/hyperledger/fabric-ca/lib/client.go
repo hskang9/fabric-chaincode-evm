@@ -33,8 +33,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hyperledger/fabric-sdk-go/api/apicryptosuite"
-	"github.com/hyperledger/fabric-sdk-go/pkg/errors"
+	"github.com/pkg/errors"
 
 	cfsslapi "github.com/cloudflare/cfssl/api"
 	"github.com/cloudflare/cfssl/csr"
@@ -42,6 +41,7 @@ import (
 	"github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric-ca/lib/tls"
 	log "github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric-ca/sdkpatch/logbridge"
 	"github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric-ca/util"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	"github.com/mitchellh/mapstructure"
 )
 
@@ -56,7 +56,7 @@ type Client struct {
 	// File and directory paths
 	keyFile, certFile, caCertsDir string
 	// The crypto service provider (BCCSP)
-	csp apicryptosuite.CryptoSuite
+	csp core.CryptoSuite
 	// HTTP client associated with this Fabric CA client
 	httpClient *http.Client
 }
@@ -134,6 +134,8 @@ type GetServerInfoResponse struct {
 	// CAChain is the PEM-encoded bytes of the fabric-ca-server's CA chain.
 	// The 1st element of the chain is the root CA cert
 	CAChain []byte
+	// Version of the server
+	Version string
 }
 
 // Convert from network to local server information
@@ -144,6 +146,7 @@ func (c *Client) net2LocalServerInfo(net *serverInfoResponseNet, local *GetServe
 	}
 	local.CAName = net.CAName
 	local.CAChain = caChain
+	local.Version = net.Version
 	return nil
 }
 
@@ -206,7 +209,7 @@ func (c *Client) Enroll(req *api.EnrollmentRequest) (*EnrollmentResponse, error)
 // @param result The result from server
 // @param id Name of identity being enrolled or reenrolled
 // @param key The private key which was used to sign the request
-func (c *Client) newEnrollmentResponse(result *enrollmentResponseNet, id string, key apicryptosuite.Key) (*EnrollmentResponse, error) {
+func (c *Client) newEnrollmentResponse(result *enrollmentResponseNet, id string, key core.Key) (*EnrollmentResponse, error) {
 	log.Debugf("newEnrollmentResponse %s", id)
 	certByte, err := util.B64Decode(result.Cert)
 	if err != nil {
@@ -223,7 +226,7 @@ func (c *Client) newEnrollmentResponse(result *enrollmentResponseNet, id string,
 }
 
 // GenCSR generates a CSR (Certificate Signing Request)
-func (c *Client) GenCSR(req *api.CSRInfo, id string) ([]byte, apicryptosuite.Key, error) {
+func (c *Client) GenCSR(req *api.CSRInfo, id string) ([]byte, core.Key, error) {
 	log.Debugf("GenCSR %+v", req)
 
 	err := c.Init()
@@ -235,7 +238,7 @@ func (c *Client) GenCSR(req *api.CSRInfo, id string) ([]byte, apicryptosuite.Key
 	cr.CN = id
 
 	if cr.KeyRequest == nil {
-		cr.KeyRequest = csr.NewBasicKeyRequest()
+		cr.KeyRequest = newCfsslBasicKeyRequest(api.NewBasicKeyRequest())
 	}
 
 	key, cspSigner, err := util.BCCSPKeyRequestGenerate(cr, c.csp)
@@ -271,7 +274,7 @@ func (c *Client) newCertificateRequest(req *api.CSRInfo) *csr.CertificateRequest
 		}
 	}
 	if req != nil && req.KeyRequest != nil {
-		cr.KeyRequest = req.KeyRequest
+		cr.KeyRequest = newCfsslBasicKeyRequest(req.KeyRequest)
 	}
 	if req != nil {
 		cr.CA = req.CA
@@ -281,7 +284,7 @@ func (c *Client) newCertificateRequest(req *api.CSRInfo) *csr.CertificateRequest
 }
 
 // NewIdentity creates a new identity
-func (c *Client) NewIdentity(key apicryptosuite.Key, cert []byte) (*Identity, error) {
+func (c *Client) NewIdentity(key core.Key, cert []byte) (*Identity, error) {
 	name, err := util.GetEnrollmentIDFromPEM(cert)
 	if err != nil {
 		return nil, err
@@ -315,7 +318,7 @@ func (c *Client) SendReq(req *http.Request, result interface{}) (err error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return errors.Wrapf(err, "POST failure of request: %s", reqStr)
+		return errors.Wrapf(err, "%s failure of request: %s", req.Method, reqStr)
 	}
 	var respBody []byte
 	if resp.Body != nil {
@@ -375,6 +378,10 @@ func (c *Client) getURL(endpoint string) (string, error) {
 	}
 	rtn := fmt.Sprintf("%s/%s", nurl, endpoint)
 	return rtn, nil
+}
+
+func newCfsslBasicKeyRequest(bkr *api.BasicKeyRequest) *csr.BasicKeyRequest {
+	return &csr.BasicKeyRequest{A: bkr.Algo, S: bkr.Size}
 }
 
 // NormalizeURL normalizes a URL (from cfssl)

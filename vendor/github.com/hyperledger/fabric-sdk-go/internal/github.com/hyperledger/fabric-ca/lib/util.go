@@ -25,8 +25,9 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"net/http"
 
-	"github.com/hyperledger/fabric-sdk-go/pkg/errors"
+	"github.com/pkg/errors"
 
 	"github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric-ca/util"
 )
@@ -61,4 +62,10 @@ func BytesToX509Cert(bytes []byte) (*x509.Certificate, error) {
 		return nil, errors.Wrap(err, "Buffer was neither PEM nor DER encoding")
 	}
 	return cert, err
+}
+
+func addQueryParm(req *http.Request, name, value string) {
+	url := req.URL.Query()
+	url.Add(name, value)
+	req.URL.RawQuery = url.Encode()
 }

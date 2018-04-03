@@ -7,32 +7,28 @@ SPDX-License-Identifier: Apache-2.0
 package fabsdk
 
 import (
-	"github.com/hyperledger/fabric-sdk-go/api/apilogging"
-	"github.com/hyperledger/fabric-sdk-go/def/factory/defclient"
-	"github.com/hyperledger/fabric-sdk-go/def/factory/defcore"
-	"github.com/hyperledger/fabric-sdk-go/def/factory/defsvc"
-	apisdk "github.com/hyperledger/fabric-sdk-go/pkg/fabsdk/api"
-	"github.com/hyperledger/fabric-sdk-go/pkg/logging/modlog"
+	"github.com/hyperledger/fabric-sdk-go/pkg/core/logging/api"
+	"github.com/hyperledger/fabric-sdk-go/pkg/core/logging/modlog"
+	sdkApi "github.com/hyperledger/fabric-sdk-go/pkg/fabsdk/api"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk/factory/defcore"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk/factory/defmsp"
+	"github.com/hyperledger/fabric-sdk-go/pkg/fabsdk/factory/defsvc"
 )
 
 type defPkgSuite struct{}
 
-func (ps *defPkgSuite) Core() (apisdk.CoreProviderFactory, error) {
+func (ps *defPkgSuite) Core() (sdkApi.CoreProviderFactory, error) {
 	return defcore.NewProviderFactory(), nil
 }
 
-func (ps *defPkgSuite) Service() (apisdk.ServiceProviderFactory, error) {
+func (ps *defPkgSuite) MSP() (sdkApi.MSPProviderFactory, error) {
+	return defmsp.NewProviderFactory(), nil
+}
+
+func (ps *defPkgSuite) Service() (sdkApi.ServiceProviderFactory, error) {
 	return defsvc.NewProviderFactory(), nil
 }
 
-func (ps *defPkgSuite) Context() (apisdk.OrgClientFactory, error) {
-	return defclient.NewOrgClientFactory(), nil
-}
-
-func (ps *defPkgSuite) Session() (apisdk.SessionClientFactory, error) {
-	return defclient.NewSessionClientFactory(), nil
-}
-
-func (ps *defPkgSuite) Logger() (apilogging.LoggerProvider, error) {
+func (ps *defPkgSuite) Logger() (api.LoggerProvider, error) {
 	return modlog.LoggerProvider(), nil
 }

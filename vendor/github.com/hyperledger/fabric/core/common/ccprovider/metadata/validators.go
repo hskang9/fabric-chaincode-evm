@@ -8,9 +8,8 @@ package metadata
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/ioutil"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -20,7 +19,7 @@ import (
 var logger = flogging.MustGetLogger("metadata")
 
 // fileValidators are used as handlers to validate specific metadata directories
-type fileValidator func(srcPath string) error
+type fileValidator func(fileName string, fileBytes []byte) error
 
 // Currently, the only metadata expected and allowed is for META-INF/statedb/couchdb/indexes.
 var fileValidators = map[string]fileValidator{
@@ -36,18 +35,27 @@ func (e *UnhandledDirectoryError) Error() string {
 	return e.err
 }
 
-// InvalidFileError is returned for invalid metadata files
-type InvalidFileError struct {
+// BadExtensionError is returned for metadata files with extension other than .json
+type BadExtensionError struct {
 	err string
 }
 
-func (e *InvalidFileError) Error() string {
+func (e *BadExtensionError) Error() string {
+	return e.err
+}
+
+// InvalidIndexContentError is returned for metadata files with invalid content
+type InvalidIndexContentError struct {
+	err string
+}
+
+func (e *InvalidIndexContentError) Error() string {
 	return e.err
 }
 
 // ValidateMetadataFile checks that metadata files are valid
 // according to the validation rules of the metadata directory (metadataType)
-func ValidateMetadataFile(srcPath, metadataType string) error {
+func ValidateMetadataFile(fileName string, fileBytes []byte, metadataType string) error {
 	// Get the validator handler for the metadata directory
 	fileValidator, ok := fileValidators[metadataType]
 
@@ -56,10 +64,10 @@ func ValidateMetadataFile(srcPath, metadataType string) error {
 		return &UnhandledDirectoryError{fmt.Sprintf("Metadata not supported in directory: %s", metadataType)}
 	}
 
-	// If the file is not valid for the given metadata directory, return InvalidFileError
-	err := fileValidator(srcPath)
+	// If the file is not valid for the given metadata directory, return the corresponding error
+	err := fileValidator(fileName, fileBytes)
 	if err != nil {
-		return &InvalidFileError{fmt.Sprintf("Metadata file [%s] failed validation: %s", srcPath, err)}
+		return err
 	}
 
 	// file is valid, return nil error
@@ -67,20 +75,28 @@ func ValidateMetadataFile(srcPath, metadataType string) error {
 }
 
 // couchdbIndexFileValidator implements fileValidator
-func couchdbIndexFileValidator(srcPath string) error {
-	fileBytes, err := ioutil.ReadFile(srcPath)
-	if err != nil {
-		return err
+func couchdbIndexFileValidator(fileName string, fileBytes []byte) error {
+
+	ext := filepath.Ext(fileName)
+
+	// if the file does not have a .json extension, then return as error
+	if ext != ".json" {
+		return &BadExtensionError{fmt.Sprintf("Index metadata file [%s] does not have a .json extension", fileName)}
 	}
 
 	// if the content does not validate as JSON, return err to invalidate the file
 	boolIsJSON, indexDefinition := isJSON(fileBytes)
 	if !boolIsJSON {
-		return errors.New("File is not valid JSON")
+		return &InvalidIndexContentError{fmt.Sprintf("Index metadata file [%s] is not a valid JSON", fileName)}
 	}
 
 	// validate the index definition
-	return validateIndexJSON(indexDefinition)
+	err := validateIndexJSON(indexDefinition)
+	if err != nil {
+		return &InvalidIndexContentError{fmt.Sprintf("Index metadata file [%s] is not a valid index definition: %s", fileName, err)}
+	}
+
+	return nil
 
 }
 

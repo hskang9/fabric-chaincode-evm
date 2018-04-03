@@ -38,10 +38,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hyperledger/fabric-sdk-go/api/apicryptosuite"
 	factory "github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric-ca/sdkpatch/cryptosuitebridge"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 
-	"github.com/hyperledger/fabric-sdk-go/pkg/errors"
+	"github.com/pkg/errors"
 
 	"golang.org/x/crypto/ocsp"
 )
@@ -111,7 +111,7 @@ func Marshal(from interface{}, what string) ([]byte, error) {
 // @param cert The pem-encoded certificate
 // @param key The pem-encoded key
 // @param body The body of an HTTP request
-func CreateToken(csp apicryptosuite.CryptoSuite, cert []byte, key apicryptosuite.Key, body []byte) (string, error) {
+func CreateToken(csp core.CryptoSuite, cert []byte, key core.Key, body []byte) (string, error) {
 	x509Cert, err := GetX509CertificateFromPEM(cert)
 	if err != nil {
 		return "", err
@@ -141,7 +141,7 @@ func CreateToken(csp apicryptosuite.CryptoSuite, cert []byte, key apicryptosuite
 //GenRSAToken signs the http body and cert with RSA using RSA private key
 // @csp : BCCSP instance
 /*
-func GenRSAToken(csp apicryptosuite.CryptoSuite, cert []byte, key []byte, body []byte) (string, error) {
+func GenRSAToken(csp core.CryptoSuite, cert []byte, key []byte, body []byte) (string, error) {
 	privKey, err := GetRSAPrivateKey(key)
 	if err != nil {
 		return "", err
@@ -164,7 +164,7 @@ func GenRSAToken(csp apicryptosuite.CryptoSuite, cert []byte, key []byte, body [
 */
 
 //GenECDSAToken signs the http body and cert with ECDSA using EC private key
-func GenECDSAToken(csp apicryptosuite.CryptoSuite, cert []byte, key apicryptosuite.Key, body []byte) (string, error) {
+func GenECDSAToken(csp core.CryptoSuite, cert []byte, key core.Key, body []byte) (string, error) {
 	b64body := B64Encode(body)
 	b64cert := B64Encode(cert)
 	bodyAndcert := b64body + "." + b64cert

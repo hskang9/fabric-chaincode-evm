@@ -21,8 +21,8 @@ var (
 	// Is TLS enabled
 	tlsEnabled bool
 	// Max send and receive bytes for grpc clients and servers
-	maxRecvMsgSize = 100 * 1024 * 1024
-	maxSendMsgSize = 100 * 1024 * 1024
+	MaxRecvMsgSize = 100 * 1024 * 1024
+	MaxSendMsgSize = 100 * 1024 * 1024
 	// Default peer keepalive options
 	keepaliveOptions = &KeepaliveOptions{
 		ClientInterval:    time.Duration(1) * time.Minute,  // 1 min
@@ -40,10 +40,15 @@ var (
 		tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
 		tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
 	}
+	// default connection timeout
+	DefaultConnectionTimeout = 5 * time.Second
 )
 
 // ServerConfig defines the parameters for configuring a GRPCServer instance
 type ServerConfig struct {
+	// ConnectionTimeout specifies the timeout for connection establishment
+	// for all new connections
+	ConnectionTimeout time.Duration
 	// SecOpts defines the security parameters
 	SecOpts *SecureOptions
 	// KaOpts defines the keepalive parameters
@@ -116,30 +121,6 @@ func TLSEnabled() bool {
 		cacheConfiguration()
 	}
 	return tlsEnabled
-}
-
-// MaxRecvMsgSize returns the maximum message size in bytes that gRPC clients
-// and servers can receive
-func MaxRecvMsgSize() int {
-	return maxRecvMsgSize
-}
-
-// SetMaxRecvMsgSize sets the maximum message size in bytes that gRPC clients
-// and servers can receive
-func SetMaxRecvMsgSize(size int) {
-	maxRecvMsgSize = size
-}
-
-// MaxSendMsgSize returns the maximum message size in bytes that gRPC clients
-// and servers can send
-func MaxSendMsgSize() int {
-	return maxSendMsgSize
-}
-
-// SetMaxSendMsgSize sets the maximum message size in bytes that gRPC clients
-// and servers can send
-func SetMaxSendMsgSize(size int) {
-	maxSendMsgSize = size
 }
 
 // DefaultKeepaliveOptions returns sane default keepalive settings for gRPC

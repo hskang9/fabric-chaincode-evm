@@ -19,10 +19,10 @@ import (
 	"fmt"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/hyperledger/fabric-sdk-go/api/apicryptosuite"
 	factory "github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric/sdkpatch/cryptosuitebridge"
-	"github.com/hyperledger/fabric-sdk-go/pkg/errors"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 	m "github.com/hyperledger/fabric-sdk-go/third_party/github.com/hyperledger/fabric/protos/msp"
+	"github.com/pkg/errors"
 )
 
 // mspSetupFuncType is the prototype of the setup function
@@ -69,7 +69,7 @@ type bccspmsp struct {
 	admins []Identity
 
 	// the crypto provider
-	bccsp apicryptosuite.CryptoSuite
+	bccsp core.CryptoSuite
 
 	// the provider identifier for this MSP
 	name string
@@ -90,14 +90,14 @@ type bccspmsp struct {
 	ouEnforcement bool
 	// These are the OUIdentifiers of the clients, peers and orderers.
 	// They are used to tell apart these entities
-	clientOU, peerOU, ordererOU *OUIdentifier
+	clientOU, peerOU *OUIdentifier
 }
 
 // NewBccspMsp returns an MSP instance backed up by a BCCSP
 // crypto provider. It handles x.509 certificates and can
 // generate identities and signing identities backed by
 // certificates and keypairs
-func NewBccspMsp(version MSPVersion, cryptoSuite apicryptosuite.CryptoSuite) (MSP, error) {
+func NewBccspMsp(version MSPVersion, cryptoSuite core.CryptoSuite) (MSP, error) {
 	mspLogger.Debugf("Creating BCCSP-based MSP instance")
 
 	theMsp := &bccspmsp{}
@@ -138,7 +138,7 @@ func (msp *bccspmsp) getCertFromPem(idBytes []byte) (*x509.Certificate, error) {
 	return cert, nil
 }
 
-func (msp *bccspmsp) getIdentityFromConf(idBytes []byte) (Identity, apicryptosuite.Key, error) {
+func (msp *bccspmsp) getIdentityFromConf(idBytes []byte) (Identity, core.Key, error) {
 	// get a cert
 	cert, err := msp.getCertFromPem(idBytes)
 	if err != nil {
@@ -308,8 +308,6 @@ func (msp *bccspmsp) hasOURoleInternal(id *identity, mspRole m.MSPRole_MSPRoleTy
 		nodeOUValue = msp.clientOU.OrganizationalUnitIdentifier
 	case m.MSPRole_PEER:
 		nodeOUValue = msp.peerOU.OrganizationalUnitIdentifier
-	case m.MSPRole_ORDERER:
-		nodeOUValue = msp.ordererOU.OrganizationalUnitIdentifier
 	default:
 		return fmt.Errorf("Invalid MSPRoleType. It must be CLIENT, PEER or ORDERER")
 	}
@@ -411,8 +409,6 @@ func (msp *bccspmsp) SatisfiesPrincipal(id Identity, principal *m.MSPPrincipal) 
 		case m.MSPRole_CLIENT:
 			fallthrough
 		case m.MSPRole_PEER:
-			fallthrough
-		case m.MSPRole_ORDERER:
 			mspLogger.Debugf("Checking if identity satisfies role [%s] for %s", m.MSPRole_MSPRoleType_name[int32(mspRole.Role)], msp.name)
 			if err := msp.Validate(id); err != nil {
 				return errors.Wrapf(err, "The identity is not valid under this MSP [%s]", msp.name)

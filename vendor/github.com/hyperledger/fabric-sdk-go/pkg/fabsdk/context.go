@@ -7,132 +7,85 @@ SPDX-License-Identifier: Apache-2.0
 package fabsdk
 
 import (
-	"github.com/hyperledger/fabric-sdk-go/api/apiconfig"
-	"github.com/hyperledger/fabric-sdk-go/api/apicore"
-	"github.com/hyperledger/fabric-sdk-go/api/apicryptosuite"
-	apifabclient "github.com/hyperledger/fabric-sdk-go/api/apifabclient"
-	"github.com/hyperledger/fabric-sdk-go/pkg/errors"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/msp"
+	"github.com/pkg/errors"
 )
 
-type sdkContext struct {
-	sdk *FabricSDK
-}
-
-// ConfigProvider returns the Config provider of sdk.
-func (c *sdkContext) ConfigProvider() apiconfig.Config {
-	return c.sdk.configProvider
-}
-
-// CryptoSuiteProvider returns the BCCSP provider of sdk.
-func (c *sdkContext) CryptoSuiteProvider() apicryptosuite.CryptoSuite {
-	return c.sdk.cryptoSuite
-}
-
-// StateStoreProvider returns state store
-func (c *sdkContext) StateStoreProvider() apifabclient.KeyValueStore {
-	return c.sdk.stateStore
-}
-
-// DiscoveryProvider returns discovery provider
-func (c *sdkContext) DiscoveryProvider() apifabclient.DiscoveryProvider {
-	return c.sdk.discoveryProvider
-}
-
-// SelectionProvider returns selection provider
-func (c *sdkContext) SelectionProvider() apifabclient.SelectionProvider {
-	return c.sdk.selectionProvider
-}
-
-// SigningManager returns signing manager
-func (c *sdkContext) SigningManager() apifabclient.SigningManager {
-	return c.sdk.signingManager
-}
-
-// FabricProvider provides fabric objects such as peer and user
-func (c *sdkContext) FabricProvider() apicore.FabricProvider {
-	return c.sdk.fabricProvider
-}
-
 type identityOptions struct {
-	identity apifabclient.IdentityContext
-	ok       bool
+	signingIdentity msp.SigningIdentity
+	orgName         string
+	username        string
 }
 
-// IdentityOption provides parameters for creating a session (primarily from a fabric identity/user)
-type IdentityOption func(s *identityOptions, sdk *FabricSDK, orgName string) error
+// ContextOption provides parameters for creating a session (primarily from a fabric identity/user)
+type ContextOption func(s *identityOptions) error
 
 // WithUser uses the named user to load the identity
-func WithUser(name string) IdentityOption {
-	return func(o *identityOptions, sdk *FabricSDK, orgName string) error {
-		if o.ok {
-			return errors.New("Identity already determined")
-		}
-
-		identity, err := sdk.newUser(orgName, name)
-		if err != nil {
-			return errors.WithMessage(err, "Unable to load identity")
-		}
-		o.identity = identity
-		o.ok = true
+func WithUser(username string) ContextOption {
+	return func(o *identityOptions) error {
+		o.username = username
 		return nil
-
 	}
 }
 
 // WithIdentity uses a pre-constructed identity object as the credential for the session
-func WithIdentity(identity apifabclient.IdentityContext) IdentityOption {
-	return func(o *identityOptions, sdk *FabricSDK, orgName string) error {
-		if o.ok {
-			return errors.New("Identity already determined")
-		}
-		o.identity = identity
-		o.ok = true
+func WithIdentity(signingIdentity msp.SigningIdentity) ContextOption {
+	return func(o *identityOptions) error {
+		o.signingIdentity = signingIdentity
 		return nil
 	}
 }
 
-func (sdk *FabricSDK) newIdentity(orgName string, options ...IdentityOption) (apifabclient.IdentityContext, error) {
-	opts := identityOptions{}
+// WithOrg uses the named organization
+func WithOrg(org string) ContextOption {
+	return func(o *identityOptions) error {
+		o.orgName = org
+		return nil
+	}
+}
+
+// ErrAnonymousIdentity is returned when options for identity creation
+// don't include neither username nor identity
+var ErrAnonymousIdentity = errors.New("missing credentials")
+
+func (sdk *FabricSDK) newIdentity(options ...ContextOption) (msp.SigningIdentity, error) {
+	clientConfig, err := sdk.provider.IdentityConfig().Client()
+	if err != nil {
+		return nil, errors.WithMessage(err, "retrieving client configuration failed")
+	}
+
+	opts := identityOptions{
+		orgName: clientConfig.Organization,
+	}
 
 	for _, option := range options {
-		err := option(&opts, sdk, orgName)
+		err := option(&opts)
 		if err != nil {
-			return nil, errors.WithMessage(err, "Error in option passed to client")
+			return nil, errors.WithMessage(err, "error in option passed to create identity")
 		}
 	}
 
-	if !opts.ok {
-		return nil, errors.New("Missing identity")
+	if opts.signingIdentity == nil && opts.username == "" {
+		return nil, ErrAnonymousIdentity
 	}
 
-	return opts.identity, nil
-}
-
-// session represents an identity being used with clients.
-// TODO: Better description
-// TODO: consider removing this extra wrapper.
-type session struct {
-	user apifabclient.IdentityContext
-}
-
-// newSession creates a session from a context and a user (TODO)
-func newSession(user apifabclient.IdentityContext) *session {
-	s := session{
-		user: user,
+	if opts.signingIdentity != nil {
+		return opts.signingIdentity, nil
 	}
 
-	return &s
-}
+	if opts.username == "" || opts.orgName == "" {
+		return nil, errors.New("invalid options to create identity")
+	}
 
-// Identity returns the User in the session.
-// TODO: reduce interface to identity
-func (s *session) Identity() apifabclient.IdentityContext {
-	return s.user
-}
+	mgr, ok := sdk.provider.IdentityManager(opts.orgName)
+	if !ok {
+		return nil, errors.New("invalid options to create identity, invalid org name")
+	}
 
-// FabricProvider provides fabric objects such as peer and user
-//
-// TODO: move under Providers()
-func (sdk *FabricSDK) FabricProvider() apicore.FabricProvider {
-	return sdk.fabricProvider
+	user, err := mgr.GetSigningIdentity(opts.username)
+	if err != nil {
+		return nil, err
+	}
+
+	return user, nil
 }

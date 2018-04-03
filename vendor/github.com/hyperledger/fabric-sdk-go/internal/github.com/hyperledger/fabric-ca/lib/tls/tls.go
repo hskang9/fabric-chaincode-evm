@@ -26,12 +26,12 @@ import (
 	"io/ioutil"
 	"time"
 
-	"github.com/hyperledger/fabric-sdk-go/api/apicryptosuite"
-	"github.com/hyperledger/fabric-sdk-go/pkg/errors"
+	"github.com/pkg/errors"
 
 	factory "github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric-ca/sdkpatch/cryptosuitebridge"
 	log "github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric-ca/sdkpatch/logbridge"
 	"github.com/hyperledger/fabric-sdk-go/internal/github.com/hyperledger/fabric-ca/util"
+	"github.com/hyperledger/fabric-sdk-go/pkg/common/providers/core"
 )
 
 // ServerTLSConfig defines key material for a TLS server
@@ -62,7 +62,7 @@ type KeyCertFiles struct {
 }
 
 // GetClientTLSConfig creates a tls.Config object from certs and roots
-func GetClientTLSConfig(cfg *ClientTLSConfig, csp apicryptosuite.CryptoSuite) (*tls.Config, error) {
+func GetClientTLSConfig(cfg *ClientTLSConfig, csp core.CryptoSuite) (*tls.Config, error) {
 	var certs []tls.Certificate
 
 	if csp == nil {

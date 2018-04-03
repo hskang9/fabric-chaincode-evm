@@ -314,16 +314,15 @@ func newHTTP2Client(connectCtx, ctx context.Context, addr TargetInfo, opts Conne
 func (t *http2Client) newStream(ctx context.Context, callHdr *CallHdr) *Stream {
 	// TODO(zhaoq): Handle uint32 overflow of Stream.id.
 	s := &Stream{
-		id:             t.nextID,
-		done:           make(chan struct{}),
-		goAway:         make(chan struct{}),
-		method:         callHdr.Method,
-		sendCompress:   callHdr.SendCompress,
-		buf:            newRecvBuffer(),
-		fc:             &inFlow{limit: uint32(t.initialWindowSize)},
-		sendQuotaPool:  newQuotaPool(int(t.streamSendQuota)),
-		headerChan:     make(chan struct{}),
-		contentSubtype: callHdr.ContentSubtype,
+		id:            t.nextID,
+		done:          make(chan struct{}),
+		goAway:        make(chan struct{}),
+		method:        callHdr.Method,
+		sendCompress:  callHdr.SendCompress,
+		buf:           newRecvBuffer(),
+		fc:            &inFlow{limit: uint32(t.initialWindowSize)},
+		sendQuotaPool: newQuotaPool(int(t.streamSendQuota)),
+		headerChan:    make(chan struct{}),
 	}
 	t.nextID += 2
 	s.requestRead = func(n int) {
@@ -381,11 +380,7 @@ func (t *http2Client) NewStream(ctx context.Context, callHdr *CallHdr) (_ *Strea
 	for _, c := range t.creds {
 		data, err := c.GetRequestMetadata(ctx, audience)
 		if err != nil {
-			if _, ok := status.FromError(err); ok {
-				return nil, err
-			}
-
-			return nil, streamErrorf(codes.Unauthenticated, "transport: %v", err)
+			return nil, streamErrorf(codes.Internal, "transport: %v", err)
 		}
 		for k, v := range data {
 			// Capital header names are illegal in HTTP/2.
@@ -439,7 +434,7 @@ func (t *http2Client) NewStream(ctx context.Context, callHdr *CallHdr) (_ *Strea
 	headerFields = append(headerFields, hpack.HeaderField{Name: ":scheme", Value: t.scheme})
 	headerFields = append(headerFields, hpack.HeaderField{Name: ":path", Value: callHdr.Method})
 	headerFields = append(headerFields, hpack.HeaderField{Name: ":authority", Value: callHdr.Host})
-	headerFields = append(headerFields, hpack.HeaderField{Name: "content-type", Value: contentType(callHdr.ContentSubtype)})
+	headerFields = append(headerFields, hpack.HeaderField{Name: "content-type", Value: "application/grpc"})
 	headerFields = append(headerFields, hpack.HeaderField{Name: "user-agent", Value: t.userAgent})
 	headerFields = append(headerFields, hpack.HeaderField{Name: "te", Value: "trailers"})
 
@@ -581,7 +576,7 @@ func (t *http2Client) CloseStream(s *Stream, err error) {
 	}
 	s.state = streamDone
 	s.mu.Unlock()
-	if err != nil && !rstStream {
+	if _, ok := err.(StreamError); ok {
 		rstStream = true
 		rstError = http2.ErrCodeCancel
 	}
