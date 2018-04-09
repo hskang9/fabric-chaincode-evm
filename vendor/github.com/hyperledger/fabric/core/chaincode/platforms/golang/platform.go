@@ -20,22 +20,22 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
-	"sort"
-
 	"github.com/hyperledger/fabric/common/metadata"
+	"github.com/hyperledger/fabric/core/chaincode/platforms/ccmetadata"
 	"github.com/hyperledger/fabric/core/chaincode/platforms/util"
-	ccmetadata "github.com/hyperledger/fabric/core/common/ccprovider/metadata"
+	ccprovmetadata "github.com/hyperledger/fabric/core/common/ccprovider/metadata"
 	cutil "github.com/hyperledger/fabric/core/container/util"
 	pb "github.com/hyperledger/fabric/protos/peer"
+	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 )
 
@@ -460,7 +460,11 @@ func (goPlatform *Platform) GetDeploymentPayload(spec *pb.ChaincodeSpec) ([]byte
 			// Validate metadata file for inclusion in tar
 			// Validation is based on the passed metadata directory, e.g. META-INF/statedb/couchdb/indexes
 			// Clean metadata directory to remove trailing slash
-			err = ccmetadata.ValidateMetadataFile(filename, fileBytes, filepath.Clean(packageDir))
+			//
+			// NOTE: given we now have a platform specific metadata, it would likely make sense to move
+			// core/common/ccprovider/metadata to this package (core/common/chaincode/platforms/metadata)
+			// in future.
+			err = ccprovmetadata.ValidateMetadataFile(filename, fileBytes, filepath.Clean(packageDir))
 			if err != nil {
 				return nil, err
 			}
@@ -472,8 +476,16 @@ func (goPlatform *Platform) GetDeploymentPayload(spec *pb.ChaincodeSpec) ([]byte
 		}
 	}
 
-	tw.Close()
-	gw.Close()
+	err = tw.Close()
+	if err == nil {
+		err = gw.Close()
+	}
+	if err != nil {
+		return nil, errors.Wrapf(
+			err,
+			"failed to create tar for chaincode: %s",
+			spec.GetChaincodeId().GetName())
+	}
 
 	return payload.Bytes(), nil
 }
@@ -530,4 +542,9 @@ func (goPlatform *Platform) GenerateDockerBuild(cds *pb.ChaincodeDeploymentSpec,
 	}
 
 	return cutil.WriteBytesToPackage("binpackage.tar", binpackage.Bytes(), tw)
+}
+
+//GetMetadataProvider fetches metadata provider given deployment spec
+func (goPlatform *Platform) GetMetadataProvider(cds *pb.ChaincodeDeploymentSpec) ccmetadata.MetadataProvider {
+	return &ccmetadata.TargzMetadataProvider{cds}
 }

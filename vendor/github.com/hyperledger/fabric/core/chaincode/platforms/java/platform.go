@@ -25,6 +25,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/hyperledger/fabric/core/chaincode/platforms/ccmetadata"
 	cutil "github.com/hyperledger/fabric/core/container/util"
 	pb "github.com/hyperledger/fabric/protos/peer"
 	//	"path/filepath"
@@ -67,6 +68,7 @@ func getBuildCmd(codePackage []byte) (string, error) {
 //ValidateSpec validates the java chaincode specs
 func (javaPlatform *Platform) ValidateSpec(spec *pb.ChaincodeSpec) error {
 	path, err := url.Parse(spec.ChaincodeId.Path)
+	fmt.Printf("URL: %+v\n", path)
 	if err != nil || path == nil {
 		return fmt.Errorf("invalid path: %s", err)
 	}
@@ -145,4 +147,9 @@ func (javaPlatform *Platform) GenerateDockerfile(cds *pb.ChaincodeDeploymentSpec
 
 func (javaPlatform *Platform) GenerateDockerBuild(cds *pb.ChaincodeDeploymentSpec, tw *tar.Writer) error {
 	return cutil.WriteBytesToPackage("codepackage.tgz", cds.CodePackage, tw)
+}
+
+//GetMetadataProvider fetches metadata provider given deployment spec
+func (javaPlatform *Platform) GetMetadataProvider(cds *pb.ChaincodeDeploymentSpec) ccmetadata.MetadataProvider {
+	return &ccmetadata.TargzMetadataProvider{cds}
 }

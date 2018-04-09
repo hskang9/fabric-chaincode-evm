@@ -16,8 +16,6 @@ package asm
 
 import (
 	"fmt"
-
-	"gopkg.in/fatih/set.v0"
 )
 
 type OpCode byte
@@ -187,8 +185,7 @@ const (
 	SELFDESTRUCT = 0xff
 )
 
-// Since the opcodes aren't all in order we can't use a regular slice
-var opCodeToString = map[OpCode]string{
+var opCodeNames = map[OpCode]string{
 	// 0x0 range - arithmetic ops
 	STOP:       "STOP",
 	ADD:        "ADD",
@@ -340,13 +337,19 @@ var opCodeToString = map[OpCode]string{
 	SELFDESTRUCT: "SELFDESTRUCT",
 }
 
-func OpCodeName(op OpCode) (name string, isOpcode bool) {
-	name, isOpcode = opCodeToString[op]
-	return name, isOpcode
+func GetOpCode(b byte) (OpCode, bool) {
+	op := OpCode(b)
+	_, isOpcode := opCodeNames[op]
+	return op, isOpcode
+
 }
 
 func (o OpCode) String() string {
-	str := opCodeToString[o]
+	return o.Name()
+}
+
+func (o OpCode) Name() string {
+	str := opCodeNames[o]
 	if len(str) == 0 {
 		return fmt.Sprintf("Missing opcode 0x%x", int(o))
 	}
@@ -354,21 +357,10 @@ func (o OpCode) String() string {
 	return str
 }
 
-//-----------------------------------------------------------------------------
-
-func AnalyzeJumpDests(code []byte) (dests *set.Set) {
-	dests = set.New()
-
-	for pc := uint64(0); pc < uint64(len(code)); pc++ {
-		var op OpCode = OpCode(code[pc])
-		switch op {
-		case PUSH1, PUSH2, PUSH3, PUSH4, PUSH5, PUSH6, PUSH7, PUSH8, PUSH9, PUSH10, PUSH11, PUSH12, PUSH13, PUSH14, PUSH15, PUSH16, PUSH17, PUSH18, PUSH19, PUSH20, PUSH21, PUSH22, PUSH23, PUSH24, PUSH25, PUSH26, PUSH27, PUSH28, PUSH29, PUSH30, PUSH31, PUSH32:
-			a := uint64(op) - uint64(PUSH1) + 1
-
-			pc += a
-		case JUMPDEST:
-			dests.Add(pc)
-		}
+// If OpCode is a Push<N> returns the number of bytes pushed (between 1 and 32 inclusive)
+func (o OpCode) Pushes() int {
+	if o >= PUSH1 && o <= PUSH32 {
+		return int(o - PUSH1 + 1)
 	}
-	return
+	return 0
 }

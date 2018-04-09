@@ -15,40 +15,88 @@
 package events
 
 import (
+	"context"
 	"fmt"
 
 	acm "github.com/hyperledger/burrow/account"
 	. "github.com/hyperledger/burrow/binary"
+	"github.com/hyperledger/burrow/event"
+	"github.com/tmthrgd/go-hex"
 )
 
 // Functions to generate eventId strings
 
-func EventStringAccCall(addr acm.Address) string  { return fmt.Sprintf("Acc/%s/Call", addr) }
-func EventStringLogEvent(addr acm.Address) string { return fmt.Sprintf("Log/%s", addr) }
+func EventStringAccountCall(addr acm.Address) string { return fmt.Sprintf("Acc/%s/Call", addr) }
+func EventStringLogEvent(addr acm.Address) string    { return fmt.Sprintf("Log/%s", addr) }
 
 //----------------------------------------
 
 // EventDataCall fires when we call a contract, and when a contract calls another contract
 type EventDataCall struct {
-	CallData  *CallData   `json:"call_data"`
-	Origin    acm.Address `json:"origin"`
-	TxID      []byte      `json:"tx_id"`
-	Return    []byte      `json:"return"`
-	Exception string      `json:"exception"`
+	CallData  *CallData
+	Origin    acm.Address
+	TxID      []byte
+	Return    []byte
+	Exception string
 }
 
 type CallData struct {
-	Caller acm.Address `json:"caller"`
-	Callee acm.Address `json:"callee"`
-	Data   []byte      `json:"data"`
-	Value  uint64      `json:"value"`
-	Gas    uint64      `json:"gas"`
+	Caller acm.Address
+	Callee acm.Address
+	Data   []byte
+	Value  uint64
+	Gas    uint64
 }
 
 // EventDataLog fires when a contract executes the LOG opcode
 type EventDataLog struct {
-	Address acm.Address `json:"address"`
-	Topics  []Word256   `json:"topics"`
-	Data    []byte      `json:"data"`
-	Height  uint64      `json:"height"`
+	Address acm.Address
+	Topics  []Word256
+	Data    []byte
+	Height  uint64
+}
+
+// Publish/Subscribe
+
+// Subscribe to account call event - if TxHash is provided listens for a specifc Tx otherwise captures all
+func SubscribeAccountCall(ctx context.Context, subscribable event.Subscribable, subscriber string, address acm.Address,
+	txHash []byte, ch chan<- *EventDataCall) error {
+
+	query := event.QueryForEventID(EventStringAccountCall(address))
+
+	if len(txHash) > 0 {
+		query = query.AndEquals(event.TxHashKey, hex.EncodeUpperToString(txHash))
+	}
+
+	return event.SubscribeCallback(ctx, subscribable, subscriber, query, func(message interface{}) bool {
+		eventDataCall, ok := message.(*EventDataCall)
+		if ok {
+			ch <- eventDataCall
+		}
+		return true
+	})
+}
+
+func SubscribeLogEvent(ctx context.Context, subscribable event.Subscribable, subscriber string, address acm.Address,
+	ch chan<- *EventDataLog) error {
+
+	query := event.QueryForEventID(EventStringLogEvent(address))
+
+	return event.SubscribeCallback(ctx, subscribable, subscriber, query, func(message interface{}) bool {
+		eventDataLog, ok := message.(*EventDataLog)
+		if ok {
+			ch <- eventDataLog
+		}
+		return true
+	})
+}
+
+func PublishAccountCall(publisher event.Publisher, address acm.Address, eventDataCall *EventDataCall) error {
+	return event.PublishWithEventID(publisher, EventStringAccountCall(address), eventDataCall,
+		map[string]interface{}{"address": address, event.TxHashKey: hex.EncodeUpperToString(eventDataCall.TxID)})
+}
+
+func PublishLogEvent(publisher event.Publisher, address acm.Address, eventDataLog *EventDataLog) error {
+	return event.PublishWithEventID(publisher, EventStringLogEvent(address), eventDataLog,
+		map[string]interface{}{"address": address})
 }
