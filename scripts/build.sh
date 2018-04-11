@@ -11,14 +11,11 @@ go get -u github.com/kardianos/govendor
 
 cd $EVMSCC_PATH
 
-# echo "removing packages already vendored in fabric from evmscc"
-# comm -12 <(cd $EVMSCC_PATH && govendor list +v | awk '{print $2}' | sort) <(cd $FABRIC_PATH && govendor list +v | awk '{print $2}' | sort) | xargs -n1 -I{} rm -rf vendor/{} 
+echo "removing packages already vendored in fabric from evmscc"
+comm -12 <(cd $EVMSCC_PATH && govendor list +v | awk '{print $2}' | sort) <(cd $FABRIC_PATH && govendor list +v | awk '{print $2}' | sort) | xargs -n1 -I{} rm -rf vendor/{} 
 
 echo "copying packages needed by evmscc to fabric vendor"
 cp -r $EVMSCC_PATH/vendor/* $FABRIC_PATH/vendor/ #&& rm -rf $EVMSCC_PATH/vendor
-
-# echo "going to sleep for 5 min"
-# sleep 300
 
 echo "copying evmscc to fabric plugin"
 mkdir -p $FABRIC_PATH/plugin/evmscc && cp -r $EVMSCC_PATH/evmscc/evmscc.go $FABRIC_PATH/plugin/evmscc
