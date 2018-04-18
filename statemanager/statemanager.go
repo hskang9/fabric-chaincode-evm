@@ -25,14 +25,19 @@ type StateManager interface {
 	UpdateAccount(updatedAccount account.Account) error
 	RemoveAccount(address account.Address) error
 	SetStorage(address account.Address, key, value binary.Word256) error
+	Flush() error
 }
 
 type stateManager struct {
-	stub shim.ChaincodeStubInterface
+	stub  shim.ChaincodeStubInterface
+	cache map[string]binary.Word256
 }
 
 func NewStateManager(stub shim.ChaincodeStubInterface) StateManager {
-	return &stateManager{stub: stub}
+	return &stateManager{
+		stub:  stub,
+		cache: make(map[string]binary.Word256),
+	}
 }
 
 func (s *stateManager) GetAccount(address account.Address) (account.Account, error) {
@@ -54,6 +59,10 @@ func (s *stateManager) GetAccount(address account.Address) (account.Account, err
 func (s *stateManager) GetStorage(address account.Address, key binary.Word256) (binary.Word256, error) {
 	compKey := address.String() + key.String()
 
+	if val, ok := s.cache[compKey]; ok {
+		return val, nil
+	}
+
 	val, err := s.stub.GetState(compKey)
 	if err != nil {
 		return binary.Word256{}, err
@@ -71,6 +80,16 @@ func (s *stateManager) RemoveAccount(address account.Address) error {
 }
 
 func (s *stateManager) SetStorage(address account.Address, key, value binary.Word256) error {
-	compKey := address.String() + key.String()
-	return s.stub.PutState(compKey, value.Bytes())
+	s.cache[address.String() + key.String()] = value
+	return nil
+}
+
+func (s *stateManager) Flush() error {
+	for key, val := range s.cache {
+		if err := s.stub.PutState(key, val.Bytes()); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
