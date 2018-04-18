@@ -52,8 +52,15 @@ func (evmscc *EvmChaincode) Init(stub shim.ChaincodeStubInterface) pb.Response {
 func (evmscc *EvmChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response {
 	// We always expect 2 args: 'callee address, input data' or ' getCode ,  contract address'
 	args := stub.GetArgs()
+
+	if len(args) == 1 {
+		if string(args[0]) == "account" {
+			return evmscc.account(stub)
+		}
+	}
+
 	if len(args) != 2 {
-		return shim.Error(fmt.Sprintf("expects 2 args, got %d", len(args)))
+		return shim.Error(fmt.Sprintf("expects 2 args, got %d : %s", len(args), string(args[0])))
 	}
 
 	if string(args[0]) == "getCode" {
@@ -170,6 +177,25 @@ func (evmscc *EvmChaincode) getCode(stub shim.ChaincodeStubInterface, address []
 	}
 
 	return shim.Success([]byte(hex.EncodeToString(code)))
+}
+
+func (evmscc *EvmChaincode) account(stub shim.ChaincodeStubInterface) pb.Response {
+	creatorBytes, err := stub.GetCreator()
+	if err != nil {
+		return shim.Error(fmt.Sprintf("failed to get creator: %s", err.Error()))
+	}
+
+	si := &msp.SerializedIdentity{}
+	if err = proto.Unmarshal(creatorBytes, si); err != nil {
+		return shim.Error(fmt.Sprintf("failed to unmarshal serialized identity: %s", err.Error()))
+	}
+
+	callerAddr, err := identityToAddr(si.IdBytes)
+	if err != nil {
+		return shim.Error(fmt.Sprintf("fail to convert identity to address: %s", err.Error()))
+	}
+
+	return shim.Success([]byte(callerAddr.String()))
 }
 
 func newParams() evm.Params {
