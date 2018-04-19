@@ -271,6 +271,9 @@ var _ = Describe("Statemanager", func() {
 				val, err := mockStub.GetState(compKey)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(val).To(Equal(updatedVal.Bytes()))
+
+				// Put state should only have been called from above call in the test.
+				Expect(mockStub.PutStateCallCount()).To(Equal(1))
 			})
 		})
 
@@ -282,6 +285,8 @@ var _ = Describe("Statemanager", func() {
 				val, err := mockStub.GetState(compKey)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(val).To(Equal(initialVal.Bytes()))
+
+				Expect(mockStub.PutStateCallCount()).To(Equal(0))
 			})
 		})
 
@@ -297,6 +302,64 @@ var _ = Describe("Statemanager", func() {
 				val, err := mockStub.GetState(compKey)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(val).To(BeEmpty())
+			})
+		})
+	})
+
+	Describe("Flush", func() {
+		var key, key2, val binary.Word256
+
+		Context("when SetStorage has previously been called", func() {
+			BeforeEach(func() {
+				val = binary.LeftPadWord256([]byte("storage-value"))
+				key = binary.LeftPadWord256([]byte("key"))
+
+				key2 = binary.LeftPadWord256([]byte("key2"))
+
+				err := sm.SetStorage(addr, key, val)
+				Expect(err).ToNot(HaveOccurred())
+				err = sm.SetStorage(addr, key2, val)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(mockStub.PutStateCallCount()).To(Equal(0))
+
+				Expect(mockStub.GetState(addr.String() + key.String())).To(BeEmpty())
+				Expect(mockStub.GetState(addr.String() + key2.String())).To(BeEmpty())
+			})
+
+			It("writes all the setStorage calls to the ledger", func() {
+				sm.Flush()
+				Expect(mockStub.PutStateCallCount()).To(Equal(2))
+
+				Expect(mockStub.GetState(addr.String() + key.String())).To(Equal(val))
+				Expect(mockStub.GetState(addr.String() + key2.String())).To(Equal(val))
+			})
+
+			Context("when SetStorage is called on the same key more than once", func() {
+				var val2 binary.Word256
+				BeforeEach(func() {
+					val2 = binary.LeftPadWord256([]byte("storage-value"))
+
+					err := sm.SetStorage(addr, key, val)
+					Expect(err).ToNot(HaveOccurred())
+				})
+
+				It("writes the last value to the ledger", func() {
+					sm.Flush()
+					Expect(mockStub.PutStateCallCount()).To(Equal(2))
+
+					Expect(mockStub.GetState(addr.String() + key.String())).To(Equal(val2))
+					Expect(mockStub.GetState(addr.String() + key2.String())).To(Equal(val))
+				})
+			})
+		})
+
+		Context("when SetStorage has not been previously been called", func() {
+			It("does not write anything to the ledger", func() {
+				err := sm.Flush()
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(mockStub.PutStateCallCount()).To(Equal(0))
 			})
 		})
 	})
