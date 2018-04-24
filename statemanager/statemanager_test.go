@@ -28,10 +28,11 @@ import (
 var _ = Describe("Statemanager", func() {
 
 	var (
-		sm         statemanager.StateManager
-		mockStub   *mocks.MockStub
-		addr       account.Address
-		fakeLedger map[string][]byte
+		sm            statemanager.StateManager
+		mockStub      *mocks.MockStub
+		addr          account.Address
+		fakeGetLedger map[string][]byte
+		fakePutLedger map[string][]byte
 	)
 
 	BeforeEach(func() {
@@ -41,25 +42,29 @@ var _ = Describe("Statemanager", func() {
 		var err error
 		addr, err = account.AddressFromBytes([]byte("0000000000000address"))
 		Expect(err).ToNot(HaveOccurred())
-		fakeLedger = make(map[string][]byte)
+		fakeGetLedger = make(map[string][]byte)
+		fakePutLedger = make(map[string][]byte)
+
+		//Writing to a separate ledger so that writes to the ledger cannot be read in the same transaction.
+		// This is more consistent with the behavior fo the ledger
 		mockStub.PutStateStub = func(key string, value []byte) error {
-			fakeLedger[key] = value
+			fakePutLedger[key] = value
 			return nil
 		}
 
 		mockStub.GetStateStub = func(key string) ([]byte, error) {
-			return fakeLedger[key], nil
+			return fakeGetLedger[key], nil
+		}
+
+		mockStub.DelStateStub = func(key string) error {
+			delete(fakePutLedger, key)
+			return nil
 		}
 	})
 
 	Describe("GetAccount", func() {
-		BeforeEach(func() {
-
-		})
 		It("returns the account associated with the address", func() {
-			err := mockStub.PutState(addr.String(), []byte("account code"))
-
-			Expect(err).ToNot(HaveOccurred())
+			fakeGetLedger[addr.String()] = []byte("account code")
 
 			expectedAcct := account.ConcreteAccount{
 				Address: addr,
@@ -70,7 +75,6 @@ var _ = Describe("Statemanager", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(acct).To(Equal(expectedAcct))
-
 		})
 
 		Context("when no account exists", func() {
@@ -94,19 +98,40 @@ var _ = Describe("Statemanager", func() {
 				Expect(acct).To(Equal(account.ConcreteAccount{}.Account()))
 			})
 		})
+
+		Context("when a GetAccount is called after an UpdateAccount on the same account in the same tx", func() {
+			var updatedCode []byte
+			BeforeEach(func() {
+
+				fakeGetLedger[addr.String()] = []byte("initial account code")
+
+				updatedCode = []byte("updated account code")
+				updatedAccount := account.ConcreteAccount{
+					Address: addr,
+					Code:    updatedCode,
+				}.Account()
+
+				err := sm.UpdateAccount(updatedAccount)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("returns the account that was previously written in the same tx", func() {
+				acct, err := sm.GetAccount(addr)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(acct.Code().Bytes()).To(Equal(updatedCode))
+			})
+		})
 	})
 
 	Describe("GetStorage", func() {
 		var expectedVal, key binary.Word256
 		BeforeEach(func() {
-
 			expectedVal = binary.LeftPadWord256([]byte("storage-value"))
 			key = binary.LeftPadWord256([]byte("key"))
 		})
 
 		It("returns the value associated with the key", func() {
-			err := mockStub.PutState(addr.String()+key.String(), expectedVal.Bytes())
-			Expect(err).ToNot(HaveOccurred())
+			fakeGetLedger[addr.String()+key.String()] = expectedVal.Bytes()
 
 			val, err := sm.GetStorage(addr, key)
 			Expect(err).ToNot(HaveOccurred())
@@ -124,6 +149,29 @@ var _ = Describe("Statemanager", func() {
 				Expect(err).To(HaveOccurred())
 
 				Expect(val).To(Equal(binary.Word256{}))
+			})
+		})
+
+		Context("when a GetStorage is called after an SetStorage on the same key in the same tx", func() {
+			var initialVal, updatedVal binary.Word256
+			BeforeEach(func() {
+				initialVal = binary.LeftPadWord256([]byte("storage-value"))
+				updatedVal = binary.LeftPadWord256([]byte("updated-storage-value"))
+
+				fakeGetLedger[addr.String()+key.String()] = initialVal.Bytes()
+
+				val, err := sm.GetStorage(addr, key)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(val).To(Equal(initialVal))
+
+				err = sm.SetStorage(addr, key, updatedVal)
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("returns the account that was previously written in the same tx", func() {
+				val, err := sm.GetStorage(addr, key)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(val).To(Equal(updatedVal))
 			})
 		})
 	})
@@ -145,17 +193,18 @@ var _ = Describe("Statemanager", func() {
 				err := sm.UpdateAccount(expectedAcct)
 				Expect(err).ToNot(HaveOccurred())
 
-				code, err := mockStub.GetState(addr.String())
-				Expect(err).ToNot(HaveOccurred())
+				Expect(mockStub.PutStateCallCount()).To(Equal(1))
+
+				key, code := mockStub.PutStateArgsForCall(0)
+
+				Expect(key).To(Equal(addr.String()))
 				Expect(code).To(Equal(initialCode))
 			})
 		})
 
 		Context("when the account exists", func() {
 			It("updates the account", func() {
-
-				err := mockStub.PutState(addr.String(), initialCode)
-				Expect(err).ToNot(HaveOccurred())
+				fakeGetLedger[addr.String()] = initialCode
 
 				updatedCode := []byte("updated account code")
 				updatedAccount := account.ConcreteAccount{
@@ -163,13 +212,15 @@ var _ = Describe("Statemanager", func() {
 					Code:    updatedCode,
 				}.Account()
 
-				err = sm.UpdateAccount(updatedAccount)
+				err := sm.UpdateAccount(updatedAccount)
 				Expect(err).ToNot(HaveOccurred())
 
-				code, err := mockStub.GetState(addr.String())
-				Expect(err).ToNot(HaveOccurred())
-				Expect(code).To(Equal(updatedCode))
+				Expect(mockStub.PutStateCallCount()).To(Equal(1))
+				putAddr, putVal := mockStub.PutStateArgsForCall(0)
+				Expect(putAddr).To(Equal(addr.String()))
+				Expect(putVal).To(Equal(updatedCode))
 			})
+
 		})
 
 		Context("when stub throws an error", func() {
@@ -185,43 +236,83 @@ var _ = Describe("Statemanager", func() {
 
 				err := sm.UpdateAccount(expectedAcct)
 				Expect(err).To(HaveOccurred())
-
-				code, err := mockStub.GetState(addr.String())
-				Expect(err).ToNot(HaveOccurred())
-				Expect(code).To(BeEmpty())
 			})
+
+			Context("when GetStorage is called consecutively", func() {
+				BeforeEach(func() {
+					expectedAcct := account.ConcreteAccount{
+						Address: addr,
+						Code:    initialCode,
+					}.Account()
+
+					err := sm.UpdateAccount(expectedAcct)
+					Expect(err).To(HaveOccurred())
+
+				})
+				It("does not return the value that failed to insert", func() {
+					acct, err := sm.GetAccount(addr)
+					Expect(err).ToNot(HaveOccurred())
+
+					Expect(acct).To(Equal(account.ConcreteAccount{}.Account()))
+				})
+
+			})
+		})
+
+		//TODO: Do we care about this case? Should we assume that we don't need to deal with it?
+		Context("when the account was previously deleted in the same tx", func() {
+			BeforeEach(func() {
+				fakeGetLedger[addr.String()] = initialCode
+
+				err := sm.RemoveAccount(addr)
+				Expect(err).ToNot(HaveOccurred())
+
+				acct, err := sm.GetAccount(addr)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(acct.Code().Bytes()).To(Equal(initialCode))
+			})
+
+			It("re-creates the new account", func() {
+				updatedCode := []byte("updatedCode")
+				expectedAcct := account.ConcreteAccount{
+					Address: addr,
+					Code:    updatedCode,
+				}.Account()
+
+				err := sm.UpdateAccount(expectedAcct)
+				Expect(err).To(HaveOccurred())
+
+				acct, err := sm.GetAccount(addr)
+
+				Expect(err).ToNot(HaveOccurred())
+				Expect(acct.Code().Bytes()).To(Equal(updatedCode))
+			})
+
 		})
 	})
 
 	Describe("RemoveAccount", func() {
-		BeforeEach(func() {
-			mockStub.DelStateStub = func(key string) error {
-				delete(fakeLedger, key)
-				return nil
-			}
-		})
 		Context("when the account existed previously", func() {
 			It("removes the account", func() {
-				err := mockStub.PutState(addr.String(), []byte("account code"))
+				fakeGetLedger[addr.String()] = []byte("account code")
+
+				err := sm.RemoveAccount(addr)
 				Expect(err).ToNot(HaveOccurred())
 
-				err = sm.RemoveAccount(addr)
-				Expect(err).ToNot(HaveOccurred())
-
-				code, err := mockStub.GetState(addr.String())
-				Expect(err).ToNot(HaveOccurred())
-				Expect(code).To(BeEmpty())
+				Expect(mockStub.DelStateCallCount()).To(Equal(1))
+				delAddr := mockStub.DelStateArgsForCall(0)
+				Expect(delAddr).To(Equal(addr.String()))
 			})
 		})
 
-		Context("when the accound did not exists previously", func() {
+		Context("when the account did not exists previously", func() {
 			It("does not return an error", func() {
 				err := sm.RemoveAccount(addr)
 				Expect(err).ToNot(HaveOccurred())
 
-				code, err := mockStub.GetState(addr.String())
-				Expect(err).ToNot(HaveOccurred())
-				Expect(code).To(BeEmpty())
+				Expect(mockStub.DelStateCallCount()).To(Equal(1))
+				delAddr := mockStub.DelStateArgsForCall(0)
+				Expect(delAddr).To(Equal(addr.String()))
 			})
 		})
 
@@ -232,15 +323,14 @@ var _ = Describe("Statemanager", func() {
 
 			It("returns an error", func() {
 				initialCode := []byte("account code")
-				err := mockStub.PutState(addr.String(), initialCode)
-				Expect(err).ToNot(HaveOccurred())
+				fakeGetLedger[addr.String()] = []byte("account code")
 
-				err = sm.RemoveAccount(addr)
+				err := sm.RemoveAccount(addr)
 				Expect(err).To(HaveOccurred())
 
-				code, err := mockStub.GetState(addr.String())
+				acct, err := sm.GetAccount(addr)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(code).To(Equal(initialCode))
+				Expect(acct.Code().Bytes()).To(Equal(initialCode))
 			})
 		})
 	})
@@ -268,12 +358,10 @@ var _ = Describe("Statemanager", func() {
 				err = sm.SetStorage(addr, key, updatedVal)
 				Expect(err).ToNot(HaveOccurred())
 
-				val, err := mockStub.GetState(compKey)
-				Expect(err).ToNot(HaveOccurred())
-				Expect(val).To(Equal(updatedVal.Bytes()))
-
-				// Put state should only have been called from above call in the test.
-				Expect(mockStub.PutStateCallCount()).To(Equal(1))
+				Expect(mockStub.PutStateCallCount()).To(Equal(2))
+				putKey, putVal := mockStub.PutStateArgsForCall(1)
+				Expect(putKey).To(Equal(compKey))
+				Expect(putVal).To(Equal(updatedVal.Bytes()))
 			})
 		})
 
@@ -282,11 +370,10 @@ var _ = Describe("Statemanager", func() {
 				err := sm.SetStorage(addr, key, initialVal)
 				Expect(err).ToNot(HaveOccurred())
 
-				val, err := mockStub.GetState(compKey)
-				Expect(err).ToNot(HaveOccurred())
-				Expect(val).To(Equal(initialVal.Bytes()))
-
-				Expect(mockStub.PutStateCallCount()).To(Equal(0))
+				Expect(mockStub.PutStateCallCount()).To(Equal(1))
+				putKey, putVal := mockStub.PutStateArgsForCall(0)
+				Expect(putKey).To(Equal(compKey))
+				Expect(putVal).To(Equal(initialVal.Bytes()))
 			})
 		})
 
@@ -302,64 +389,6 @@ var _ = Describe("Statemanager", func() {
 				val, err := mockStub.GetState(compKey)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(val).To(BeEmpty())
-			})
-		})
-	})
-
-	Describe("Flush", func() {
-		var key, key2, val binary.Word256
-
-		Context("when SetStorage has previously been called", func() {
-			BeforeEach(func() {
-				val = binary.LeftPadWord256([]byte("storage-value"))
-				key = binary.LeftPadWord256([]byte("key"))
-
-				key2 = binary.LeftPadWord256([]byte("key2"))
-
-				err := sm.SetStorage(addr, key, val)
-				Expect(err).ToNot(HaveOccurred())
-				err = sm.SetStorage(addr, key2, val)
-				Expect(err).ToNot(HaveOccurred())
-
-				Expect(mockStub.PutStateCallCount()).To(Equal(0))
-
-				Expect(mockStub.GetState(addr.String() + key.String())).To(BeEmpty())
-				Expect(mockStub.GetState(addr.String() + key2.String())).To(BeEmpty())
-			})
-
-			It("writes all the setStorage calls to the ledger", func() {
-				sm.Flush()
-				Expect(mockStub.PutStateCallCount()).To(Equal(2))
-
-				Expect(mockStub.GetState(addr.String() + key.String())).To(Equal(val))
-				Expect(mockStub.GetState(addr.String() + key2.String())).To(Equal(val))
-			})
-
-			Context("when SetStorage is called on the same key more than once", func() {
-				var val2 binary.Word256
-				BeforeEach(func() {
-					val2 = binary.LeftPadWord256([]byte("storage-value"))
-
-					err := sm.SetStorage(addr, key, val)
-					Expect(err).ToNot(HaveOccurred())
-				})
-
-				It("writes the last value to the ledger", func() {
-					sm.Flush()
-					Expect(mockStub.PutStateCallCount()).To(Equal(2))
-
-					Expect(mockStub.GetState(addr.String() + key.String())).To(Equal(val2))
-					Expect(mockStub.GetState(addr.String() + key2.String())).To(Equal(val))
-				})
-			})
-		})
-
-		Context("when SetStorage has not been previously been called", func() {
-			It("does not write anything to the ledger", func() {
-				err := sm.Flush()
-				Expect(err).ToNot(HaveOccurred())
-
-				Expect(mockStub.PutStateCallCount()).To(Equal(0))
 			})
 		})
 	})

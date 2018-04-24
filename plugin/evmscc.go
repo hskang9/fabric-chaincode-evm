@@ -125,10 +125,6 @@ func (evmscc *EvmChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response
 			return shim.Error(fmt.Sprintf("nil bytecode"))
 		}
 
-		if err = state.Flush(); err != nil {
-			return shim.Error(fmt.Sprintf("failed to flush state writes to ledger: %s", err.Error()))
-		}
-
 		contractAcct.SetCode(rtCode)
 		if err = state.UpdateAccount(contractAcct); err != nil {
 			return shim.Error(fmt.Sprintf("failed to update contract account: %s", err.Error()))
@@ -147,10 +143,6 @@ func (evmscc *EvmChaincode) Invoke(stub shim.ChaincodeStubInterface) pb.Response
 		output, err := vm.Call(callerAcct, account.AsMutableAccount(calleeAcct), calleeAcct.Code().Bytes(), input, 0, &gas)
 		if err != nil {
 			return shim.Error(fmt.Sprintf("failed to execute contract: %s", err.Error()))
-		}
-
-		if err = state.Flush(); err != nil {
-			return shim.Error(fmt.Sprintf("failed to flush state writes to ledger: %s", err.Error()))
 		}
 
 		return shim.Success(output)

@@ -25,25 +25,38 @@ type StateManager interface {
 	UpdateAccount(updatedAccount account.Account) error
 	RemoveAccount(address account.Address) error
 	SetStorage(address account.Address, key, value binary.Word256) error
-	Flush() error
 }
 
 type stateManager struct {
-	stub  shim.ChaincodeStubInterface
-	cache map[string]binary.Word256
+	stub         shim.ChaincodeStubInterface
+	cache        map[string]binary.Word256
+	acctCache    map[string][]byte
+	deletedAccts map[string]byte
 }
 
 func NewStateManager(stub shim.ChaincodeStubInterface) StateManager {
 	return &stateManager{
-		stub:  stub,
-		cache: make(map[string]binary.Word256),
+		stub:         stub,
+		cache:        make(map[string]binary.Word256),
+		acctCache:    make(map[string][]byte),
+		deletedAccts: make(map[string]byte),
 	}
 }
 
 func (s *stateManager) GetAccount(address account.Address) (account.Account, error) {
-	code, err := s.stub.GetState(address.String())
-	if err != nil {
-		return account.ConcreteAccount{}.Account(), err
+	var code []byte
+
+	var ok bool
+	if _, ok = s.deletedAccts[address.String()]; ok {
+		return account.ConcreteAccount{}.Account(), nil
+	}
+
+	if code, ok = s.acctCache[address.String()]; !ok {
+		var err error
+		code, err = s.stub.GetState(address.String())
+		if err != nil {
+			return account.ConcreteAccount{}.Account(), err
+		}
 	}
 
 	if len(code) == 0 {
@@ -67,29 +80,40 @@ func (s *stateManager) GetStorage(address account.Address, key binary.Word256) (
 	if err != nil {
 		return binary.Word256{}, err
 	}
+
 	return binary.LeftPadWord256(val), nil
 }
 
 func (s *stateManager) UpdateAccount(updatedAccount account.Account) error {
+	var err error
+	if err = s.stub.PutState(updatedAccount.Address().String(), updatedAccount.Code().Bytes()); err == nil {
+		s.acctCache[updatedAccount.Address().String()] = updatedAccount.Code().Bytes()
+	}
 
-	return s.stub.PutState(updatedAccount.Address().String(), updatedAccount.Code().Bytes())
+	if _, ok := s.deletedAccts[updatedAccount.Address().String()]; ok {
+		delete(s.deletedAccts, updatedAccount.Address().String())
+	}
+
+	return err
+
 }
 
+//What happens you delete account and you try to reference it afterwards?
 func (s *stateManager) RemoveAccount(address account.Address) error {
-	return s.stub.DelState(address.String())
+	var err error
+	if err = s.stub.DelState(address.String()); err == nil {
+		s.deletedAccts[address.String()] = byte('1')
+	}
+	return err
 }
 
 func (s *stateManager) SetStorage(address account.Address, key, value binary.Word256) error {
-	s.cache[address.String() + key.String()] = value
-	return nil
-}
 
-func (s *stateManager) Flush() error {
-	for key, val := range s.cache {
-		if err := s.stub.PutState(key, val.Bytes()); err != nil {
-			return err
-		}
+	var err error
+	if err = s.stub.PutState(address.String()+key.String(), value.Bytes()); err == nil {
+
+		s.cache[address.String()+key.String()] = value
 	}
 
-	return nil
+	return err
 }
