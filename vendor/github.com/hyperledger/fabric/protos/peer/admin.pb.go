@@ -29,6 +29,7 @@ It has these top-level messages:
 	ChaincodeSpec
 	ChaincodeDeploymentSpec
 	ChaincodeInvocationSpec
+	LifecycleEvent
 	ChaincodeEvent
 	ChaincodeMessage
 	GetState
@@ -43,6 +44,8 @@ It has these top-level messages:
 	QueryResponse
 	AnchorPeers
 	AnchorPeer
+	APIResource
+	ACLs
 	ChaincodeReg
 	Interest
 	Register
@@ -70,7 +73,6 @@ It has these top-level messages:
 	ChaincodeInfo
 	ChannelQueryResponse
 	ChannelInfo
-	APIResource
 	ChaincodeIdentifier
 	ChaincodeValidation
 	VSCCArgs

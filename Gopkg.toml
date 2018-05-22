@@ -21,6 +21,10 @@
   version = "~0.6.0"
   name = "github.com/tendermint/tmlibs"
 
+[[override]]
+  revision = "57142e89befe90977da6dce7762f9fcc70f28da1"
+  name = "github.com/docker/docker"
+
 [prune]
   go-tests = true
   unused-packages = true

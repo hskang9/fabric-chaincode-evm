@@ -80,7 +80,7 @@ var streamGetter peerStreamGetter
 //the non-mock user CC stream establishment func
 func userChaincodeStreamGetter(name string) (PeerChaincodeStream, error) {
 	flag.StringVar(&peerAddress, "peer.address", "", "peer address")
-	if comm.TLSEnabled() {
+	if viper.GetBool("peer.tls.enabled") {
 		keyPath := viper.GetString("tls.client.key.path")
 		certPath := viper.GetString("tls.client.cert.path")
 
@@ -165,8 +165,8 @@ func IsEnabledForLogLevel(logLevel string) bool {
 }
 
 // SetupChaincodeLogging sets the chaincode logging format and the level
-// to the values of CORE_CHAINCODE_LOGFORMAT and CORE_CHAINCODE_LOGLEVEL set
-// from core.yaml by chaincode_support.go
+// to the values of CORE_CHAINCODE_LOGGING_FORMAT, CORE_CHAINCODE_LOGGING_LEVEL
+// and CORE_CHAINCODE_LOGGING_SHIM set from core.yaml by chaincode_support.go
 func SetupChaincodeLogging() {
 	viper.SetEnvPrefix("CORE")
 	viper.AutomaticEnv()
@@ -254,7 +254,7 @@ func newPeerClientConnection() (*grpc.ClientConn, error) {
 		ClientInterval: time.Duration(1) * time.Minute,
 		ClientTimeout:  time.Duration(20) * time.Second,
 	}
-	if comm.TLSEnabled() {
+	if viper.GetBool("peer.tls.enabled") {
 		return comm.NewClientConnectionWithAddress(peerAddress, true, true,
 			comm.InitTLSForShim(key, cert), kaOpts)
 	}
@@ -293,6 +293,7 @@ func chatWithPeer(chaincodename string, stream PeerChaincodeStream, cc Chaincode
 				go func() {
 					var in2 *pb.ChaincodeMessage
 					in2, err = stream.Recv()
+					errc <- err
 					msgAvail <- in2
 				}()
 			}
@@ -303,7 +304,7 @@ func chatWithPeer(chaincodename string, stream PeerChaincodeStream, cc Chaincode
 					continue
 				}
 				//no, bail
-				err = errors.Wrap(sendErr, fmt.Sprintf("error sending %s", in.Type.String()))
+				err = errors.Wrap(sendErr, "error sending")
 				return
 			case in = <-msgAvail:
 				if err == io.EOF {
@@ -437,6 +438,73 @@ func (stub *ChaincodeStub) DelState(key string) error {
 	// Access public data by setting the collection to empty string
 	collection := ""
 	return stub.handler.handleDelState(collection, key, stub.ChannelId, stub.TxID)
+}
+
+//  ---------  private state functions  ---------
+
+// GetPrivateData documentation can be found in interfaces.go
+func (stub *ChaincodeStub) GetPrivateData(collection string, key string) ([]byte, error) {
+	if collection == "" {
+		return nil, fmt.Errorf("collection must not be an empty string")
+	}
+	return stub.handler.handleGetState(collection, key, stub.ChannelId, stub.TxID)
+}
+
+// PutPrivateData documentation can be found in interfaces.go
+func (stub *ChaincodeStub) PutPrivateData(collection string, key string, value []byte) error {
+	if collection == "" {
+		return fmt.Errorf("collection must not be an empty string")
+	}
+	if key == "" {
+		return fmt.Errorf("key must not be an empty string")
+	}
+	return stub.handler.handlePutState(collection, key, value, stub.ChannelId, stub.TxID)
+}
+
+// DelPrivateData documentation can be found in interfaces.go
+func (stub *ChaincodeStub) DelPrivateData(collection string, key string) error {
+	if collection == "" {
+		return fmt.Errorf("collection must not be an empty string")
+	}
+	return stub.handler.handleDelState(collection, key, stub.ChannelId, stub.TxID)
+}
+
+// GetPrivateDataByRange documentation can be found in interfaces.go
+func (stub *ChaincodeStub) GetPrivateDataByRange(collection, startKey, endKey string) (StateQueryIteratorInterface, error) {
+	if collection == "" {
+		return nil, fmt.Errorf("collection must not be an empty string")
+	}
+	if startKey == "" {
+		startKey = emptyKeySubstitute
+	}
+	if err := validateSimpleKeys(startKey, endKey); err != nil {
+		return nil, err
+	}
+	return stub.handleGetStateByRange(collection, startKey, endKey)
+}
+
+// GetPrivateDataByPartialCompositeKey documentation can be found in interfaces.go
+func (stub *ChaincodeStub) GetPrivateDataByPartialCompositeKey(collection, objectType string, attributes []string) (StateQueryIteratorInterface, error) {
+	if collection == "" {
+		return nil, fmt.Errorf("collection must not be an empty string")
+	}
+	if partialCompositeKey, err := stub.CreateCompositeKey(objectType, attributes); err == nil {
+		return stub.handleGetStateByRange(collection, partialCompositeKey, partialCompositeKey+string(maxUnicodeRuneValue))
+	} else {
+		return nil, err
+	}
+}
+
+// GetPrivateDataQueryResult documentation can be found in interfaces.go
+func (stub *ChaincodeStub) GetPrivateDataQueryResult(collection, query string) (StateQueryIteratorInterface, error) {
+	if collection == "" {
+		return nil, fmt.Errorf("collection must not be an empty string")
+	}
+	response, err := stub.handler.handleGetQueryResult(collection, query, stub.ChannelId, stub.TxID)
+	if err != nil {
+		return nil, err
+	}
+	return &StateQueryIterator{CommonIterator: &CommonIterator{stub.handler, stub.TxID, stub.ChannelId, response, 0}}, nil
 }
 
 // CommonIterator documentation can be found in interfaces.go
