@@ -28,8 +28,7 @@ var _ = FDescribe("Ethservice", func() {
 		mockChClient = &mocks.MockChannelClient{}
 
 		fabSDK.GetChannelClientReturns(mockChClient, nil)
-		ethservice = fabproxy.NewEthService(fabSDK, channelID)
-
+		ethservice = fabproxy.NewEthService(fabSDK)
 	})
 
 	//TODO: Fix the query args. Need to find out if fab sdk uses invoke or the "function" used by the chaincode as the function arg
@@ -294,11 +293,20 @@ var _ = FDescribe("Ethservice", func() {
 
 				if string(request.Args[0]) == "GetTransactionById" {
 					sampleTx, err := GetSampleTransaction([][]byte{[]byte("sample arg 1"), []byte("sample arg 2")}, []byte("sample-response"))
-					Expect
-					sampleResponse.Payload
+					Expect(err).ToNot(HaveOccurred())
+
+					txBytes, err := proto.Marshal(&sampleTx)
+					Expect(err).ToNot(HaveOccurred())
+					sampleResponse.Payload = txBytes
 
 				} else if string(request.Args[0]) == "GetBlockByTxID" {
 
+					sampleTx, err := GetSampleBlock(1, []byte("12345abcd"))
+					Expect(err).ToNot(HaveOccurred())
+
+					txBytes, err := proto.Marshal(&sampleTx)
+					Expect(err).ToNot(HaveOccurred())
+					sampleResponse.Payload = txBytes
 				}
 
 				return sampleResponse, errors.New("boom!")

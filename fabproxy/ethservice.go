@@ -46,7 +46,7 @@ type TxReceipt struct {
 	CumulativeGasUsed int
 }
 
-func NewEthService(sdk SDK, channelID string) *EthService {
+func NewEthService(sdk SDK) *EthService {
 	return &EthService{sdk: sdk}
 }
 
