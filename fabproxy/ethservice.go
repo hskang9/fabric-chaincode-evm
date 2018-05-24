@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/hyperledger/fabric-sdk-go/pkg/client/channel"
 )
@@ -36,6 +37,15 @@ type EthArgs struct {
 	Nonce    string
 }
 
+type TxReceipt struct {
+	TransactionHash   string
+	BlockHash         string
+	BlockNumber       string
+	ContractAddress   string
+	GasUsed           int
+	CumulativeGasUsed int
+}
+
 func NewEthService(sdk SDK, channelID string) *EthService {
 	return &EthService{sdk: sdk}
 }
@@ -46,7 +56,7 @@ func (s *EthService) GetCode(r *http.Request, arg *string, reply *string) error 
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))
 	}
 
-	response, err := s.query(EVMSCC, chClient, "getCode", [][]byte{[]byte(*arg)})
+	response, err := s.query(chClient, EVMSCC, [][]byte{[]byte("getCode"), []byte(strip0xFromHex(*arg))})
 
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to query the ledger: %s", err.Error()))
@@ -63,7 +73,7 @@ func (s *EthService) Call(r *http.Request, args *EthArgs, reply *string) error {
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))
 	}
 
-	response, err := s.query(EVMSCC, chClient, args.To, [][]byte{[]byte(args.Data)})
+	response, err := s.query(chClient, EVMSCC, [][]byte{[]byte(args.To), []byte(args.Data)})
 
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to query the ledger: %s", err.Error()))
@@ -94,11 +104,23 @@ func (s *EthService) SendTransaction(r *http.Request, args *EthArgs, reply *stri
 	return nil
 }
 
-func (s *EthService) query(chClient ChannelClient, ccid string, function string, queryArgs [][]byte) (channel.Response, error) {
+func (s *EthService) GetTransactionReceipt(r *http.Request, arg *string, reply *TxReceipt) error {
+	return nil
+}
+
+func strip0xFromHex(addr string) string {
+	stripped := strings.Split(addr, "0x")
+	// if len(stripped) != 1 {
+	// 	panic("Had more then 1 0x in address")
+	// }
+	return stripped[len(stripped)-1]
+}
+
+func (s *EthService) query(chClient ChannelClient, ccid string, queryArgs [][]byte) (channel.Response, error) {
 
 	return chClient.Query(channel.Request{
 		ChaincodeID: ccid,
-		Fcn:         function,
+		Fcn:         "invoke",
 		Args:        queryArgs,
 	})
 }
