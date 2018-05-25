@@ -35,9 +35,9 @@ var _ = Describe("Evmscc", func() {
 	}
 
 	var (
-		evmscc     shim.Chaincode
-		stub       *mocks.MockStub
-		fakeLedger map[string][]byte
+		evmscc    shim.Chaincode
+		stub      *mocks.MockStub
+		akeLedger map[string][]byte
 	)
 	BeforeEach(func() {
 		evmscc = plugin.New()
