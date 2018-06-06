@@ -224,4 +224,8 @@ func identityToAddr(id []byte) (account.Address, error) {
 	return account.AddressFromWord256(sha3.Sum256(pubkeyBytes)), nil
 }
 
-func main() {}
+func main() {
+	if err := shim.Start(new(EvmChaincode)); err != nil {
+		fmt.Printf("Error starting EVMChaincode: %s", err)
+	}
+}
