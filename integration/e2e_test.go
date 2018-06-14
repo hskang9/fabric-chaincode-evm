@@ -8,7 +8,6 @@ package e2e
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -113,10 +112,7 @@ var _ = Describe("EndToEnd", func() {
 
 		adminRunner := adminPeer.InvokeChaincode(EVMSCC, deployment.Channel, `{"Args":["0000000000000000000000000000000000000000", "6060604052341561000f57600080fd5b60d38061001d6000396000f3006060604052600436106049576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff16806360fe47b114604e5780636d4ce63c14606e575b600080fd5b3415605857600080fd5b606c60048080359060200190919050506094565b005b3415607857600080fd5b607e609e565b6040518082815260200191505060405180910390f35b8060008190555050565b600080549050905600a165627a7a72305820122f55f799d70b5f6dbfd4312efb65cdbfaacddedf7c36249b8b1e915a8dd85b0029"]}`, deployment.Orderer)
 		execute(adminRunner)
-		outputBuffer := adminRunner.Err()
-		// Eventually(adminRunner.Buffer(), 10*time.Second).Should(gbytes.Say("Chaincode invoke successful"))
-		// Eventually(outputBuffer.Closed).Should(Equal(true))
-		output := outputBuffer.Contents()
+		output := adminRunner.Err().Contents()
 
 		contractAddr := string(regexp.MustCompile(`Chaincode invoke successful. result: status:200 payload:"([0-9a-fA-F]{40})"`).FindSubmatch(output)[1])
 		Expect(contractAddr).ToNot(BeEmpty())
@@ -141,27 +137,4 @@ func execute(r ifrit.Runner) (err error) {
 	Eventually(p.Ready()).Should(BeClosed())
 	Eventually(p.Wait(), 30*time.Second).Should(Receive(&err))
 	return err
-}
-
-func copyFile(src, dest string) {
-	data, err := ioutil.ReadFile(src)
-	Expect(err).NotTo(HaveOccurred())
-	err = ioutil.WriteFile(dest, data, 0775)
-	Expect(err).NotTo(HaveOccurred())
-}
-
-func copyPeerConfigs(peerOrgs []world.PeerOrgConfig, rootPath string) {
-	for _, peerOrg := range peerOrgs {
-		for peer := 0; peer < peerOrg.PeerCount; peer++ {
-			peerDir := fmt.Sprintf("peer%d.%s", peer, peerOrg.Domain)
-			if _, err := os.Stat(filepath.Join(rootPath, peerDir)); os.IsNotExist(err) {
-				err := os.Mkdir(filepath.Join(rootPath, peerDir), 0755)
-				Expect(err).NotTo(HaveOccurred())
-			}
-			copyFile(
-				filepath.Join("testdata", fmt.Sprintf("%s_%d-core.yaml", peerOrg.Domain, peer)),
-				filepath.Join(rootPath, peerDir, "core.yaml"),
-			)
-		}
-	}
 }
