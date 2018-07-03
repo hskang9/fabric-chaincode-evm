@@ -1,8 +1,10 @@
 package fabproxy_test
 
 import (
+	"encoding/hex"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/hyperledger/fabric-chaincode-evm/fabproxy"
@@ -21,23 +23,22 @@ var _ = FDescribe("Ethservice", func() {
 
 		fabSDK       *mocks.MockSDK
 		mockChClient *mocks.MockChannelClient
+		channelID    string
 	)
 
 	BeforeEach(func() {
 		fabSDK = &mocks.MockSDK{}
 		mockChClient = &mocks.MockChannelClient{}
+		channelID = "test-channel"
 
 		fabSDK.GetChannelClientReturns(mockChClient, nil)
-		ethservice = fabproxy.NewEthService(fabSDK)
+		ethservice = fabproxy.NewEthService(fabSDK, channelID)
 	})
-
-	//TODO: Fix the query args. Need to find out if fab sdk uses invoke or the "function" used by the chaincode as the function arg
-	//TODO: Fix getTransactionReceipt tests
 
 	Describe("GetCode", func() {
 		var (
-			sampleCode                          []byte
-			sampleAddress, addressWithoutPrefix string
+			sampleCode    []byte
+			sampleAddress string
 		)
 
 		BeforeEach(func() {
@@ -46,8 +47,7 @@ var _ = FDescribe("Ethservice", func() {
 				Payload: sampleCode,
 			}, nil)
 
-			sampleAddress = "0x1234567123"
-			addressWithoutPrefix = "1234567123"
+			sampleAddress = "1234567123"
 		})
 
 		It("returns the code associated to that address", func() {
@@ -60,8 +60,8 @@ var _ = FDescribe("Ethservice", func() {
 			chReq, reqOpts := mockChClient.QueryArgsForCall(0)
 			Expect(chReq).To(Equal(channel.Request{
 				ChaincodeID: fabproxy.EVMSCC,
-				Fcn:         "invoke",
-				Args:        [][]byte{[]byte("getCode"), []byte(addressWithoutPrefix)},
+				Fcn:         "getCode",
+				Args:        [][]byte{[]byte(sampleAddress)},
 			}))
 
 			Expect(reqOpts).To(HaveLen(0))
@@ -69,25 +69,9 @@ var _ = FDescribe("Ethservice", func() {
 			Expect(reply).To(Equal(string(sampleCode)))
 		})
 
-		Context("when the address is malformed", func() {
+		Context("when the address has `0x` prefix", func() {
 			BeforeEach(func() {
-				sampleAddress = "0x0x12345"
-			})
-
-			It("returns an error for a malformed address", func() {
-				var reply string
-
-				err := ethservice.GetCode(&http.Request{}, &sampleAddress, &reply)
-				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("Recieved malformed address"))
-
-				Expect(reply).To(BeEmpty())
-			})
-		})
-
-		Context("when the address does not have `0x` prefix", func() {
-			BeforeEach(func() {
-				sampleAddress = "123456"
+				sampleAddress = "0x123456"
 			})
 			It("returns the code associated with that address", func() {
 				var reply string
@@ -99,8 +83,8 @@ var _ = FDescribe("Ethservice", func() {
 				chReq, reqOpts := mockChClient.QueryArgsForCall(0)
 				Expect(chReq).To(Equal(channel.Request{
 					ChaincodeID: fabproxy.EVMSCC,
-					Fcn:         "invoke",
-					Args:        [][]byte{[]byte("getCode"), []byte(sampleAddress)},
+					Fcn:         "getCode",
+					Args:        [][]byte{[]byte(sampleAddress[2:])},
 				}))
 
 				Expect(reqOpts).To(HaveLen(0))
@@ -142,21 +126,25 @@ var _ = FDescribe("Ethservice", func() {
 		})
 	})
 
-	//TODO: Add tests for Prefix
 	Describe("Call", func() {
-		var sampleResponse []byte
+		var (
+			sampleResponse []byte
+			sampleArgs     *fabproxy.EthArgs
+		)
+
 		BeforeEach(func() {
 			sampleResponse = []byte("sample response")
 			mockChClient.QueryReturns(channel.Response{
 				Payload: sampleResponse,
 			}, nil)
+
+			sampleArgs = &fabproxy.EthArgs{
+				To:   "1234567123",
+				Data: "sample-data",
+			}
 		})
 
 		It("returns the value of the simulation of executing a smart contract", func() {
-			sampleArgs := &fabproxy.EthArgs{
-				To:   "0x1234567123",
-				Data: "sample-data",
-			}
 
 			var reply string
 
@@ -167,8 +155,8 @@ var _ = FDescribe("Ethservice", func() {
 			chReq, reqOpts := mockChClient.QueryArgsForCall(0)
 			Expect(chReq).To(Equal(channel.Request{
 				ChaincodeID: fabproxy.EVMSCC,
-				Fcn:         "invoke",
-				Args:        [][]byte{[]byte(sampleArgs.To), []byte(sampleArgs.Data)},
+				Fcn:         sampleArgs.To,
+				Args:        [][]byte{[]byte(sampleArgs.Data)},
 			}))
 
 			Expect(reqOpts).To(HaveLen(0))
@@ -207,9 +195,32 @@ var _ = FDescribe("Ethservice", func() {
 				Expect(reply).To(BeEmpty())
 			})
 		})
+
+		Context("when the address has `0x` prefix", func() {
+			BeforeEach(func() {
+				sampleArgs.To = "0x" + sampleArgs.To
+			})
+			It("strips the prefix from the query", func() {
+				var reply string
+
+				err := ethservice.Call(&http.Request{}, sampleArgs, &reply)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(mockChClient.QueryCallCount()).To(Equal(1))
+				chReq, reqOpts := mockChClient.QueryArgsForCall(0)
+				Expect(chReq).To(Equal(channel.Request{
+					ChaincodeID: fabproxy.EVMSCC,
+					Fcn:         sampleArgs.To[2:],
+					Args:        [][]byte{[]byte(sampleArgs.Data)},
+				}))
+
+				Expect(reqOpts).To(HaveLen(0))
+
+				Expect(reply).To(Equal(string(sampleResponse)))
+			})
+		})
 	})
 
-	//TODO: Add tests for Prefix
 	Describe("SendTransaction", func() {
 		var (
 			sampleResponse channel.Response
@@ -225,7 +236,7 @@ var _ = FDescribe("Ethservice", func() {
 
 		It("returns the value of the simulation of executing a smart contract", func() {
 			sampleArgs := &fabproxy.EthArgs{
-				To:   "0x1234567123",
+				To:   "1234567123",
 				Data: "sample-data",
 			}
 
@@ -238,8 +249,8 @@ var _ = FDescribe("Ethservice", func() {
 			chReq, reqOpts := mockChClient.ExecuteArgsForCall(0)
 			Expect(chReq).To(Equal(channel.Request{
 				ChaincodeID: fabproxy.EVMSCC,
-				Fcn:         "invoke",
-				Args:        [][]byte{[]byte(sampleArgs.To), []byte(sampleArgs.Data)},
+				Fcn:         sampleArgs.To,
+				Args:        [][]byte{[]byte(sampleArgs.Data)},
 			}))
 
 			Expect(reqOpts).To(HaveLen(0))
@@ -278,41 +289,76 @@ var _ = FDescribe("Ethservice", func() {
 				Expect(reply).To(BeEmpty())
 			})
 		})
+
+		Context("when the address has a `0x` prefix", func() {
+			It("strips the prefix before calling the evmscc", func() {
+				sampleArgs := &fabproxy.EthArgs{
+					To:   "0x1234567123",
+					Data: "sample-data",
+				}
+
+				var reply string
+
+				err := ethservice.SendTransaction(&http.Request{}, sampleArgs, &reply)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(mockChClient.ExecuteCallCount()).To(Equal(1))
+				chReq, reqOpts := mockChClient.ExecuteArgsForCall(0)
+				Expect(chReq).To(Equal(channel.Request{
+					ChaincodeID: fabproxy.EVMSCC,
+					Fcn:         sampleArgs.To[2:],
+					Args:        [][]byte{[]byte(sampleArgs.Data)},
+				}))
+
+				Expect(reqOpts).To(HaveLen(0))
+
+				Expect(reply).To(Equal(string(sampleResponse.TransactionID)))
+			})
+		})
 	})
 
-	// TODO: Add tests for Prefix
-	FDescribe("GetTransactionReceipt", func() {
+	Describe("GetTransactionReceipt", func() {
 		var (
 			sampleResponse      channel.Response
+			sampleTransaction   peer.ProcessedTransaction
+			sampleBlock         common.Block
 			sampleTransactionID string
+			txBytes             []byte
+			blkBytes            []byte
 		)
 
 		BeforeEach(func() {
 			sampleResponse = channel.Response{}
+
+			var err error
+			sampleTransaction, err = GetSampleTransaction([][]byte{[]byte("82373458"), []byte("sample arg 2")}, []byte("sample-response"))
+			Expect(err).ToNot(HaveOccurred())
+
+			sampleBlock, err = GetSampleBlock(1, []byte("12345abcd"))
+			Expect(err).ToNot(HaveOccurred())
+
 			mockChClient.QueryStub = func(request channel.Request, options ...channel.RequestOption) (channel.Response, error) {
 
-				if string(request.Args[0]) == "GetTransactionById" {
-					sampleTx, err := GetSampleTransaction([][]byte{[]byte("sample arg 1"), []byte("sample arg 2")}, []byte("sample-response"))
-					Expect(err).ToNot(HaveOccurred())
-
-					txBytes, err := proto.Marshal(&sampleTx)
-					Expect(err).ToNot(HaveOccurred())
+				if request.Fcn == "GetTransactionByID" {
 					sampleResponse.Payload = txBytes
 
-				} else if string(request.Args[0]) == "GetBlockByTxID" {
-
-					sampleTx, err := GetSampleBlock(1, []byte("12345abcd"))
-					Expect(err).ToNot(HaveOccurred())
-
-					txBytes, err := proto.Marshal(&sampleTx)
-					Expect(err).ToNot(HaveOccurred())
-					sampleResponse.Payload = txBytes
+				} else if request.Fcn == "GetBlockByTxID" {
+					sampleResponse.Payload = blkBytes
 				}
 
-				return sampleResponse, errors.New("boom!")
+				return sampleResponse, nil
 			}
 
-			sampleTransactionID = "0x1234567123"
+			sampleTransactionID = "1234567123"
+		})
+
+		JustBeforeEach(func() {
+			var err error
+			txBytes, err = proto.Marshal(&sampleTransaction)
+			Expect(err).ToNot(HaveOccurred())
+
+			blkBytes, err = proto.Marshal(&sampleBlock)
+			Expect(err).ToNot(HaveOccurred())
 		})
 
 		It("returns the transaction receipt associated to that transaction address", func() {
@@ -321,24 +367,114 @@ var _ = FDescribe("Ethservice", func() {
 			err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(mockChClient.QueryCallCount()).To(Equal(1))
+			Expect(mockChClient.QueryCallCount()).To(Equal(2))
 			chReq, reqOpts := mockChClient.QueryArgsForCall(0)
 			Expect(chReq).To(Equal(channel.Request{
 				ChaincodeID: fabproxy.QSCC,
-				Fcn:         "invoke",
-				Args:        [][]byte{[]byte("GetTransactionByID"), []byte(sampleTransactionID)},
+				Fcn:         "GetTransactionByID",
+				Args:        [][]byte{[]byte(channelID), []byte(sampleTransactionID)},
 			}))
+			Expect(reqOpts).To(HaveLen(0))
 
+			chReq, reqOpts = mockChClient.QueryArgsForCall(1)
+			Expect(chReq).To(Equal(channel.Request{
+				ChaincodeID: fabproxy.QSCC,
+				Fcn:         "GetBlockByTxID",
+				Args:        [][]byte{[]byte(channelID), []byte(sampleTransactionID)},
+			}))
 			Expect(reqOpts).To(HaveLen(0))
 
 			Expect(reply).To(Equal(fabproxy.TxReceipt{
 				TransactionHash:   sampleTransactionID,
-				BlockHash:         "",
-				BlockNumber:       "",
+				BlockHash:         hex.EncodeToString(sampleBlock.GetHeader().Hash()),
+				BlockNumber:       "1",
 				GasUsed:           0,
 				CumulativeGasUsed: 0,
 			}))
+		})
 
+		Context("when the transaction is creation of a smart contract", func() {
+			var contractAddress []byte
+			BeforeEach(func() {
+				contractAddress = []byte("0x123456789abcdef1234")
+				zeroAddress := make([]byte, hex.EncodedLen(len(fabproxy.ZeroAddress)))
+				hex.Encode(zeroAddress, fabproxy.ZeroAddress)
+				var err error
+				sampleTransaction, err = GetSampleTransaction([][]byte{zeroAddress, []byte("sample arg 2")}, contractAddress)
+				Expect(err).ToNot(HaveOccurred())
+
+			})
+
+			It("returns the contract address in the transaction receipt", func() {
+				var reply fabproxy.TxReceipt
+
+				err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(mockChClient.QueryCallCount()).To(Equal(2))
+				chReq, reqOpts := mockChClient.QueryArgsForCall(0)
+				Expect(chReq).To(Equal(channel.Request{
+					ChaincodeID: fabproxy.QSCC,
+					Fcn:         "GetTransactionByID",
+					Args:        [][]byte{[]byte(channelID), []byte(sampleTransactionID)},
+				}))
+				Expect(reqOpts).To(HaveLen(0))
+
+				chReq, reqOpts = mockChClient.QueryArgsForCall(1)
+				Expect(chReq).To(Equal(channel.Request{
+					ChaincodeID: fabproxy.QSCC,
+					Fcn:         "GetBlockByTxID",
+					Args:        [][]byte{[]byte(channelID), []byte(sampleTransactionID)},
+				}))
+				Expect(reqOpts).To(HaveLen(0))
+
+				Expect(reply).To(Equal(fabproxy.TxReceipt{
+					TransactionHash:   sampleTransactionID,
+					BlockHash:         hex.EncodeToString(sampleBlock.GetHeader().Hash()),
+					BlockNumber:       "1",
+					ContractAddress:   string(contractAddress),
+					GasUsed:           0,
+					CumulativeGasUsed: 0,
+				}))
+			})
+
+			Context("when transaction ID has `0x` prefix", func() {
+				BeforeEach(func() {
+					sampleTransactionID = "0x" + sampleTransactionID
+				})
+				It("strips the prefix before querying the ledger", func() {
+					var reply fabproxy.TxReceipt
+
+					err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
+					Expect(err).ToNot(HaveOccurred())
+
+					Expect(mockChClient.QueryCallCount()).To(Equal(2))
+					chReq, reqOpts := mockChClient.QueryArgsForCall(0)
+					Expect(chReq).To(Equal(channel.Request{
+						ChaincodeID: fabproxy.QSCC,
+						Fcn:         "GetTransactionByID",
+						Args:        [][]byte{[]byte(channelID), []byte(sampleTransactionID[2:])},
+					}))
+					Expect(reqOpts).To(HaveLen(0))
+
+					chReq, reqOpts = mockChClient.QueryArgsForCall(1)
+					Expect(chReq).To(Equal(channel.Request{
+						ChaincodeID: fabproxy.QSCC,
+						Fcn:         "GetBlockByTxID",
+						Args:        [][]byte{[]byte(channelID), []byte(sampleTransactionID[2:])},
+					}))
+					Expect(reqOpts).To(HaveLen(0))
+
+					Expect(reply).To(Equal(fabproxy.TxReceipt{
+						TransactionHash:   sampleTransactionID,
+						BlockHash:         hex.EncodeToString(sampleBlock.GetHeader().Hash()),
+						BlockNumber:       "1",
+						ContractAddress:   string(contractAddress),
+						GasUsed:           0,
+						CumulativeGasUsed: 0,
+					}))
+				})
+			})
 		})
 
 		Context("when getting the channel client errors ", func() {
@@ -348,8 +484,167 @@ var _ = FDescribe("Ethservice", func() {
 
 			It("returns a corresponding error", func() {
 				var reply fabproxy.TxReceipt
+				err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("Failed to generate channel client"))
+
+				Expect(reply).To(BeZero())
+			})
+		})
+
+		// Need to test multiple places the querying can fail
+		Context("when querying the ledger for the transaction errors", func() {
+			BeforeEach(func() {
+				mockChClient.QueryStub = func(request channel.Request, options ...channel.RequestOption) (channel.Response, error) {
+
+					if request.Fcn == "GetTransactionByID" {
+						return sampleResponse, errors.New("boom!")
+					} else if request.Fcn == "GetBlockByTxID" {
+
+						txBytes, err := proto.Marshal(&sampleBlock)
+						Expect(err).ToNot(HaveOccurred())
+						sampleResponse.Payload = txBytes
+					}
+
+					return sampleResponse, nil
+				}
+			})
+
+			It("returns a corresponding error", func() {
+				var reply fabproxy.TxReceipt
 
 				err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("Failed to query the ledger"))
+
+				Expect(reply).To(BeZero())
+			})
+		})
+
+		Context("when querying the ledger for the block errors", func() {
+			BeforeEach(func() {
+				mockChClient.QueryStub = func(request channel.Request, options ...channel.RequestOption) (channel.Response, error) {
+
+					if request.Fcn == "GetTransactionByID" {
+
+						txBytes, err := proto.Marshal(&sampleTransaction)
+						Expect(err).ToNot(HaveOccurred())
+						sampleResponse.Payload = txBytes
+
+					} else if request.Fcn == "GetBlockByTxID" {
+						return sampleResponse, errors.New("boom!")
+					}
+
+					return sampleResponse, nil
+				}
+			})
+
+			It("returns a corresponding error", func() {
+				var reply fabproxy.TxReceipt
+
+				err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("Failed to query the ledger"))
+
+				Expect(reply).To(BeZero())
+			})
+		})
+
+		Context("when decoding the args of the transaction fails", func() {
+			BeforeEach(func() {
+				var err error
+				sampleTransaction, err = GetSampleTransaction([][]byte{[]byte("sample arg1"), []byte("sample arg 2")}, []byte("sample-response"))
+				Expect(err).ToNot(HaveOccurred())
+			})
+
+			It("returns the corresponding error", func() {
+
+				var reply fabproxy.TxReceipt
+
+				err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("Failed to decode transaction arguments"))
+
+				Expect(reply).To(BeZero())
+			})
+		})
+
+		Context("when the transaction payload is malformed", func() {
+			JustBeforeEach(func() {
+				txBytes = append(txBytes, '0')
+			})
+
+			It("returns the corresponding error", func() {
+				var reply fabproxy.TxReceipt
+
+				err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("Failed to unmarshal transaction"))
+
+				Expect(reply).To(BeZero())
+			})
+		})
+
+		Context("when the transaction payload is malformed", func() {
+			JustBeforeEach(func() {
+				blkBytes = append(blkBytes, '0')
+			})
+
+			It("returns the corresponding error", func() {
+				var reply fabproxy.TxReceipt
+
+				err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("Failed to unmarshal block"))
+
+				Expect(reply).To(BeZero())
+			})
+		})
+	})
+
+	Describe("Accounts", func() {
+		var (
+			sampleAccount string
+		)
+
+		BeforeEach(func() {
+			sampleAccount = "123456ABCD"
+			mockChClient.QueryReturns(channel.Response{
+				Payload: []byte(sampleAccount),
+			}, nil)
+
+		})
+
+		It("requests the user address from the evmscc based on the user cert", func() {
+			var reply []string
+
+			err := ethservice.Accounts(&http.Request{}, &reply)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(mockChClient.QueryCallCount()).To(Equal(1))
+			chReq, reqOpts := mockChClient.QueryArgsForCall(0)
+			Expect(chReq).To(Equal(channel.Request{
+				ChaincodeID: fabproxy.EVMSCC,
+				Fcn:         "account",
+				Args:        [][]byte{},
+			}))
+
+			Expect(reqOpts).To(HaveLen(0))
+
+			expectedResponse := []string{"0x" + strings.ToLower(sampleAccount)}
+
+			Expect(reply).To(Equal(expectedResponse))
+		})
+
+		Context("when getting the channel client errors ", func() {
+			BeforeEach(func() {
+				fabSDK.GetChannelClientReturns(nil, errors.New("boom!"))
+			})
+
+			It("returns a corresponding error", func() {
+				var reply []string
+
+				err := ethservice.Accounts(&http.Request{}, &reply)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("Failed to generate channel client"))
 
@@ -357,16 +652,15 @@ var _ = FDescribe("Ethservice", func() {
 			})
 		})
 
-		// Need to test multiple places the querying can fail
-		XContext("when querying the ledger errors", func() {
+		Context("when querying the ledger errors", func() {
 			BeforeEach(func() {
 				mockChClient.QueryReturns(channel.Response{}, errors.New("boom!"))
 			})
 
 			It("returns a corresponding error", func() {
-				var reply fabproxy.TxReceipt
+				var reply []string
 
-				err := ethservice.GetTransactionReceipt(&http.Request{}, &sampleTransactionID, &reply)
+				err := ethservice.Accounts(&http.Request{}, &reply)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("Failed to query the ledger"))
 
