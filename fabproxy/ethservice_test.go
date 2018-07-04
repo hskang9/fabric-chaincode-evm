@@ -17,9 +17,9 @@ import (
 )
 
 var channelID = "mychannel"
-var _ = FDescribe("Ethservice", func() {
+var _ = Describe("Ethservice", func() {
 	var (
-		ethservice *fabproxy.EthService
+		ethservice fabproxy.EthService
 
 		fabSDK       *mocks.MockSDK
 		mockChClient *mocks.MockChannelClient
@@ -605,6 +605,7 @@ var _ = FDescribe("Ethservice", func() {
 	Describe("Accounts", func() {
 		var (
 			sampleAccount string
+			arg           string
 		)
 
 		BeforeEach(func() {
@@ -618,7 +619,7 @@ var _ = FDescribe("Ethservice", func() {
 		It("requests the user address from the evmscc based on the user cert", func() {
 			var reply []string
 
-			err := ethservice.Accounts(&http.Request{}, &reply)
+			err := ethservice.Accounts(&http.Request{}, &arg, &reply)
 			Expect(err).ToNot(HaveOccurred())
 
 			Expect(mockChClient.QueryCallCount()).To(Equal(1))
@@ -644,7 +645,7 @@ var _ = FDescribe("Ethservice", func() {
 			It("returns a corresponding error", func() {
 				var reply []string
 
-				err := ethservice.Accounts(&http.Request{}, &reply)
+				err := ethservice.Accounts(&http.Request{}, &arg, &reply)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("Failed to generate channel client"))
 
@@ -660,7 +661,7 @@ var _ = FDescribe("Ethservice", func() {
 			It("returns a corresponding error", func() {
 				var reply []string
 
-				err := ethservice.Accounts(&http.Request{}, &reply)
+				err := ethservice.Accounts(&http.Request{}, &arg, &reply)
 				Expect(err).To(HaveOccurred())
 				Expect(err.Error()).To(ContainSubstring("Failed to query the ledger"))
 

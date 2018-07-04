@@ -30,7 +30,15 @@ type ChannelClient interface {
 	Execute(request channel.Request, options ...channel.RequestOption) (channel.Response, error)
 }
 
-type EthService struct {
+type EthService interface {
+	GetCode(r *http.Request, arg *string, reply *string) error
+	Call(r *http.Request, args *EthArgs, reply *string) error
+	SendTransaction(r *http.Request, args *EthArgs, reply *string) error
+	GetTransactionReceipt(r *http.Request, arg *string, reply *TxReceipt) error
+	Accounts(r *http.Request, arg *string, reply *[]string) error
+}
+
+type ethService struct {
 	sdk       SDK
 	channelID string
 }
@@ -54,11 +62,11 @@ type TxReceipt struct {
 	CumulativeGasUsed int
 }
 
-func NewEthService(sdk SDK, channelID string) *EthService {
-	return &EthService{sdk: sdk, channelID: channelID}
+func NewEthService(sdk SDK, channelID string) EthService {
+	return &ethService{sdk: sdk, channelID: channelID}
 }
 
-func (s *EthService) GetCode(r *http.Request, arg *string, reply *string) error {
+func (s *ethService) GetCode(r *http.Request, arg *string, reply *string) error {
 	chClient, err := s.sdk.GetChannelClient()
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))
@@ -77,7 +85,7 @@ func (s *EthService) GetCode(r *http.Request, arg *string, reply *string) error 
 	return nil
 }
 
-func (s *EthService) Call(r *http.Request, args *EthArgs, reply *string) error {
+func (s *ethService) Call(r *http.Request, args *EthArgs, reply *string) error {
 	chClient, err := s.sdk.GetChannelClient()
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))
@@ -96,7 +104,7 @@ func (s *EthService) Call(r *http.Request, args *EthArgs, reply *string) error {
 	return nil
 }
 
-func (s *EthService) SendTransaction(r *http.Request, args *EthArgs, reply *string) error {
+func (s *ethService) SendTransaction(r *http.Request, args *EthArgs, reply *string) error {
 	chClient, err := s.sdk.GetChannelClient()
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))
@@ -117,7 +125,7 @@ func (s *EthService) SendTransaction(r *http.Request, args *EthArgs, reply *stri
 	return nil
 }
 
-func (s *EthService) GetTransactionReceipt(r *http.Request, arg *string, reply *TxReceipt) error {
+func (s *ethService) GetTransactionReceipt(r *http.Request, arg *string, reply *TxReceipt) error {
 	chClient, err := s.sdk.GetChannelClient()
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))
@@ -197,7 +205,8 @@ func (s *EthService) GetTransactionReceipt(r *http.Request, arg *string, reply *
 	return nil
 }
 
-func (s *EthService) Accounts(r *http.Request, reply *[]string) error {
+func (s *ethService) Accounts(r *http.Request, arg *string, reply *[]string) error {
+	fmt.Println("ITS GETTING ACCOUNTS")
 	chClient, err := s.sdk.GetChannelClient()
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))
@@ -213,21 +222,21 @@ func (s *EthService) Accounts(r *http.Request, reply *[]string) error {
 	return nil
 }
 
-func strip0xFromHex(addr string) string {
-	//Not checking for malformed addresses just stripping `0x` prefix where applicable
-	if len(addr) > 2 && addr[0:2] == "0x" {
-		return addr[2:]
-	}
-	return addr
-}
-
-func (s *EthService) query(chClient ChannelClient, ccid, function string, queryArgs [][]byte) (channel.Response, error) {
+func (s *ethService) query(chClient ChannelClient, ccid, function string, queryArgs [][]byte) (channel.Response, error) {
 
 	return chClient.Query(channel.Request{
 		ChaincodeID: ccid,
 		Fcn:         function,
 		Args:        queryArgs,
 	})
+}
+
+func strip0xFromHex(addr string) string {
+	//Not checking for malformed addresses just stripping `0x` prefix where applicable
+	if len(addr) > 2 && addr[0:2] == "0x" {
+		return addr[2:]
+	}
+	return addr
 }
 
 func getPayloads(txActions *peer.TransactionAction) (*peer.ChaincodeProposalPayload, *peer.ChaincodeAction, error) {
