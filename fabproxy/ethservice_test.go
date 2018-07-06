@@ -128,12 +128,14 @@ var _ = Describe("Ethservice", func() {
 
 	Describe("Call", func() {
 		var (
-			sampleResponse []byte
-			sampleArgs     *fabproxy.EthArgs
+			encodedResponse []byte
+			sampleArgs      *fabproxy.EthArgs
 		)
 
 		BeforeEach(func() {
-			sampleResponse = []byte("sample response")
+			sampleResponse := []byte("sample response")
+			encodedResponse = make([]byte, hex.EncodedLen(len(sampleResponse)))
+			hex.Encode(encodedResponse, sampleResponse)
 			mockChClient.QueryReturns(channel.Response{
 				Payload: sampleResponse,
 			}, nil)
@@ -144,7 +146,7 @@ var _ = Describe("Ethservice", func() {
 			}
 		})
 
-		It("returns the value of the simulation of executing a smart contract", func() {
+		It("returns the value of the simulation of executing a smart contract with a `0x` prefix", func() {
 
 			var reply string
 
@@ -161,7 +163,7 @@ var _ = Describe("Ethservice", func() {
 
 			Expect(reqOpts).To(HaveLen(0))
 
-			Expect(reply).To(Equal(string(sampleResponse)))
+			Expect(reply).To(Equal("0x" + string(encodedResponse)))
 		})
 
 		Context("when getting the channel client errors ", func() {
@@ -196,7 +198,7 @@ var _ = Describe("Ethservice", func() {
 			})
 		})
 
-		Context("when the address has `0x` prefix", func() {
+		Context("when the address has a `0x` prefix", func() {
 			BeforeEach(func() {
 				sampleArgs.To = "0x" + sampleArgs.To
 			})
@@ -216,7 +218,32 @@ var _ = Describe("Ethservice", func() {
 
 				Expect(reqOpts).To(HaveLen(0))
 
-				Expect(reply).To(Equal(string(sampleResponse)))
+				Expect(reply).To(Equal("0x" + string(encodedResponse)))
+			})
+		})
+
+		Context("when the data has a `0x` prefix", func() {
+			BeforeEach(func() {
+				sampleArgs.Data = "0x" + sampleArgs.Data
+			})
+
+			It("strips the prefix from the query", func() {
+				var reply string
+
+				err := ethservice.Call(&http.Request{}, sampleArgs, &reply)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(mockChClient.QueryCallCount()).To(Equal(1))
+				chReq, reqOpts := mockChClient.QueryArgsForCall(0)
+				Expect(chReq).To(Equal(channel.Request{
+					ChaincodeID: fabproxy.EVMSCC,
+					Fcn:         sampleArgs.To,
+					Args:        [][]byte{[]byte(sampleArgs.Data[2:])},
+				}))
+
+				Expect(reqOpts).To(HaveLen(0))
+
+				Expect(reply).To(Equal("0x" + string(encodedResponse)))
 			})
 		})
 	})
@@ -224,6 +251,7 @@ var _ = Describe("Ethservice", func() {
 	Describe("SendTransaction", func() {
 		var (
 			sampleResponse channel.Response
+			sampleArgs     *fabproxy.EthArgs
 		)
 
 		BeforeEach(func() {
@@ -232,16 +260,15 @@ var _ = Describe("Ethservice", func() {
 				TransactionID: "1",
 			}
 			mockChClient.ExecuteReturns(sampleResponse, nil)
-		})
 
-		It("returns the value of the simulation of executing a smart contract", func() {
-			sampleArgs := &fabproxy.EthArgs{
+			sampleArgs = &fabproxy.EthArgs{
 				To:   "1234567123",
 				Data: "sample-data",
 			}
+		})
 
+		It("returns the transaction id", func() {
 			var reply string
-
 			err := ethservice.SendTransaction(&http.Request{}, sampleArgs, &reply)
 			Expect(err).ToNot(HaveOccurred())
 
@@ -256,6 +283,31 @@ var _ = Describe("Ethservice", func() {
 			Expect(reqOpts).To(HaveLen(0))
 
 			Expect(reply).To(Equal(string(sampleResponse.TransactionID)))
+		})
+
+		Context("when the transaction is a contract deployment", func() {
+			BeforeEach(func() {
+				sampleArgs.To = ""
+			})
+
+			It("returns the transaction id", func() {
+				var reply string
+				err := ethservice.SendTransaction(&http.Request{}, sampleArgs, &reply)
+				Expect(err).ToNot(HaveOccurred())
+
+				zeroAddress := hex.EncodeToString(fabproxy.ZeroAddress)
+				Expect(mockChClient.ExecuteCallCount()).To(Equal(1))
+				chReq, reqOpts := mockChClient.ExecuteArgsForCall(0)
+				Expect(chReq).To(Equal(channel.Request{
+					ChaincodeID: fabproxy.EVMSCC,
+					Fcn:         zeroAddress,
+					Args:        [][]byte{[]byte(sampleArgs.Data)},
+				}))
+
+				Expect(reqOpts).To(HaveLen(0))
+
+				Expect(reply).To(Equal(string(sampleResponse.TransactionID)))
+			})
 		})
 
 		Context("when getting the channel client errors ", func() {
@@ -291,14 +343,12 @@ var _ = Describe("Ethservice", func() {
 		})
 
 		Context("when the address has a `0x` prefix", func() {
+			BeforeEach(func() {
+				sampleArgs.To = "0x" + sampleArgs.To
+			})
+
 			It("strips the prefix before calling the evmscc", func() {
-				sampleArgs := &fabproxy.EthArgs{
-					To:   "0x1234567123",
-					Data: "sample-data",
-				}
-
 				var reply string
-
 				err := ethservice.SendTransaction(&http.Request{}, sampleArgs, &reply)
 				Expect(err).ToNot(HaveOccurred())
 
@@ -308,6 +358,30 @@ var _ = Describe("Ethservice", func() {
 					ChaincodeID: fabproxy.EVMSCC,
 					Fcn:         sampleArgs.To[2:],
 					Args:        [][]byte{[]byte(sampleArgs.Data)},
+				}))
+
+				Expect(reqOpts).To(HaveLen(0))
+
+				Expect(reply).To(Equal(string(sampleResponse.TransactionID)))
+			})
+		})
+
+		Context("when the data has a `0x` prefix", func() {
+			BeforeEach(func() {
+				sampleArgs.Data = "0x" + sampleArgs.Data
+			})
+
+			It("strips the prefix before calling the evmscc", func() {
+				var reply string
+				err := ethservice.SendTransaction(&http.Request{}, sampleArgs, &reply)
+				Expect(err).ToNot(HaveOccurred())
+
+				Expect(mockChClient.ExecuteCallCount()).To(Equal(1))
+				chReq, reqOpts := mockChClient.ExecuteArgsForCall(0)
+				Expect(chReq).To(Equal(channel.Request{
+					ChaincodeID: fabproxy.EVMSCC,
+					Fcn:         sampleArgs.To,
+					Args:        [][]byte{[]byte(sampleArgs.Data[2:])},
 				}))
 
 				Expect(reqOpts).To(HaveLen(0))

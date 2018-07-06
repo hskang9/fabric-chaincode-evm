@@ -91,15 +91,14 @@ func (s *ethService) Call(r *http.Request, args *EthArgs, reply *string) error {
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))
 	}
 
-	strippedAddr := strip0xFromHex(args.To)
-
-	response, err := s.query(chClient, EVMSCC, strippedAddr, [][]byte{[]byte(args.Data)})
+	response, err := s.query(chClient, EVMSCC, strip0xFromHex(args.To), [][]byte{[]byte(strip0xFromHex(args.Data))})
 
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to query the ledger: %s", err.Error()))
 	}
 
-	*reply = string(response.Payload)
+	// Clients expect the prefix to present in responses
+	*reply = "0x" + hex.EncodeToString(response.Payload)
 
 	return nil
 }
@@ -110,11 +109,14 @@ func (s *ethService) SendTransaction(r *http.Request, args *EthArgs, reply *stri
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))
 	}
 
-	strippedAddr := strip0xFromHex(args.To)
+	if args.To == "" {
+		args.To = hex.EncodeToString(ZeroAddress)
+	}
+
 	response, err := chClient.Execute(channel.Request{
 		ChaincodeID: EVMSCC,
-		Fcn:         strippedAddr,
-		Args:        [][]byte{[]byte(args.Data)},
+		Fcn:         strip0xFromHex(args.To),
+		Args:        [][]byte{[]byte(strip0xFromHex(args.Data))},
 	})
 
 	if err != nil {
@@ -206,7 +208,6 @@ func (s *ethService) GetTransactionReceipt(r *http.Request, arg *string, reply *
 }
 
 func (s *ethService) Accounts(r *http.Request, arg *string, reply *[]string) error {
-	fmt.Println("ITS GETTING ACCOUNTS")
 	chClient, err := s.sdk.GetChannelClient()
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to generate channel client: %s", err.Error()))

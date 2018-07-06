@@ -61,10 +61,11 @@ type MockEthService struct {
 	getTransactionReceiptReturnsOnCall map[int]struct {
 		result1 error
 	}
-	AccountsStub        func(r *http.Request, reply *[]string) error
+	AccountsStub        func(r *http.Request, arg *string, reply *[]string) error
 	accountsMutex       sync.RWMutex
 	accountsArgsForCall []struct {
 		r     *http.Request
+		arg   *string
 		reply *[]string
 	}
 	accountsReturns struct {
@@ -277,17 +278,18 @@ func (fake *MockEthService) GetTransactionReceiptReturnsOnCall(i int, result1 er
 	}{result1}
 }
 
-func (fake *MockEthService) Accounts(r *http.Request, reply *[]string) error {
+func (fake *MockEthService) Accounts(r *http.Request, arg *string, reply *[]string) error {
 	fake.accountsMutex.Lock()
 	ret, specificReturn := fake.accountsReturnsOnCall[len(fake.accountsArgsForCall)]
 	fake.accountsArgsForCall = append(fake.accountsArgsForCall, struct {
 		r     *http.Request
+		arg   *string
 		reply *[]string
-	}{r, reply})
-	fake.recordInvocation("Accounts", []interface{}{r, reply})
+	}{r, arg, reply})
+	fake.recordInvocation("Accounts", []interface{}{r, arg, reply})
 	fake.accountsMutex.Unlock()
 	if fake.AccountsStub != nil {
-		return fake.AccountsStub(r, reply)
+		return fake.AccountsStub(r, arg, reply)
 	}
 	if specificReturn {
 		return ret.result1
@@ -301,10 +303,10 @@ func (fake *MockEthService) AccountsCallCount() int {
 	return len(fake.accountsArgsForCall)
 }
 
-func (fake *MockEthService) AccountsArgsForCall(i int) (*http.Request, *[]string) {
+func (fake *MockEthService) AccountsArgsForCall(i int) (*http.Request, *string, *[]string) {
 	fake.accountsMutex.RLock()
 	defer fake.accountsMutex.RUnlock()
-	return fake.accountsArgsForCall[i].r, fake.accountsArgsForCall[i].reply
+	return fake.accountsArgsForCall[i].r, fake.accountsArgsForCall[i].arg, fake.accountsArgsForCall[i].reply
 }
 
 func (fake *MockEthService) AccountsReturns(result1 error) {
